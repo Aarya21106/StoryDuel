@@ -7,17 +7,23 @@ interface FriendJoinProps {
   onHome: () => void;
 }
 
+interface InviteInfo {
+  creatorName: string;
+  scenarioTitle: string;
+  logline?: string;
+  toneTags?: string[];
+  runtime?: string;
+}
+
 export const FriendJoin: React.FC<FriendJoinProps> = ({ inviteCode, onJoin, onHome }) => {
   const [name, setName] = useState('');
-  const [inviteInfo, setInviteInfo] = useState<{
-    creatorName: string;
-    scenarioTitle: string;
-  } | null>(null);
+  const [inviteInfo, setInviteInfo] = useState<InviteInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    fetch(`/api/invite/${inviteCode}`)
+    const base = import.meta.env.DEV ? 'http://localhost:3001' : '';
+    fetch(`${base}/api/invite/${inviteCode}`)
       .then((res) => {
         if (!res.ok) throw new Error('Invite not found');
         return res.json();
@@ -26,10 +32,13 @@ export const FriendJoin: React.FC<FriendJoinProps> = ({ inviteCode, onJoin, onHo
         setInviteInfo({
           creatorName: data.creatorName,
           scenarioTitle: data.scenarioTitle,
+          logline: data.logline,
+          toneTags: data.toneTags,
+          runtime: data.runtime,
         });
         setLoading(false);
       })
-      .catch((e) => {
+      .catch(() => {
         setError('This story invite is invalid or has already expired.');
         setLoading(false);
       });
@@ -59,10 +68,10 @@ export const FriendJoin: React.FC<FriendJoinProps> = ({ inviteCode, onJoin, onHo
   if (error && !inviteInfo) {
     return (
       <div className="screen app-container" style={{ justifyContent: 'center', textAlign: 'center' }}>
-        <h2 style={{ marginBottom: '16px' }}>Story Not Found</h2>
+        <h2 style={{ marginBottom: '16px' }}>Story not found</h2>
         <p className="text-muted" style={{ marginBottom: '32px' }}>{error}</p>
         <PulseButton variant="primary" onClick={onHome}>
-          GO TO STORYDUEL HOME
+          Go to StoryDuel home
         </PulseButton>
       </div>
     );
@@ -71,20 +80,25 @@ export const FriendJoin: React.FC<FriendJoinProps> = ({ inviteCode, onJoin, onHo
   return (
     <div className="screen app-container" style={{ justifyContent: 'center' }}>
       <div style={{ width: '100%', textAlign: 'center' }}>
-        <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.2em', color: 'var(--accent-coral)', marginBottom: '12px', fontWeight: 600 }}>
-          YOU'VE BEEN INVITED
-        </div>
+        <div className="eyebrow" style={{ marginBottom: '12px' }}>You've been invited</div>
 
         <h2 style={{ marginBottom: '8px' }}>
-          {inviteInfo?.creatorName} wants to build a story with you.
+          {inviteInfo?.creatorName} started a story with you.
         </h2>
 
-        <p className="text-muted" style={{ fontSize: '0.9375rem', marginBottom: '36px' }}>
-          Scenario: <strong style={{ color: 'var(--text-cream)' }}>{inviteInfo?.scenarioTitle}</strong>
+        <p className="text-muted" style={{ fontSize: '0.9375rem', marginBottom: '8px' }}>
+          <strong style={{ color: 'var(--text-cream)', fontFamily: 'var(--font-serif)' }}>{inviteInfo?.scenarioTitle}</strong>
+          {inviteInfo?.runtime ? ` · ${inviteInfo.runtime}` : ''}
         </p>
 
+        {inviteInfo?.logline && (
+          <p className="text-muted" style={{ fontSize: '0.875rem', marginBottom: '32px', fontFamily: 'var(--font-serif)' }}>
+            {inviteInfo.logline}
+          </p>
+        )}
+
         <form onSubmit={handleSubmit} style={{ width: '100%', textAlign: 'left', marginBottom: '24px' }}>
-          <label style={{ fontSize: '0.8125rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)' }}>
+          <label style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
             What should we call you?
           </label>
           <input
@@ -107,7 +121,7 @@ export const FriendJoin: React.FC<FriendJoinProps> = ({ inviteCode, onJoin, onHo
 
           <div style={{ marginTop: '32px' }}>
             <PulseButton type="submit" variant="primary">
-              ACCEPT THE STORY
+              Step into the story
             </PulseButton>
           </div>
         </form>

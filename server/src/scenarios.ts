@@ -1,6 +1,8 @@
 import type { Scenario, SecretObjective } from './types.js';
 
-// ── 15 Pre-built Scenarios ──
+// ── 15 Story Bibles ──
+// Each story is authored with a real premise, two named characters, a
+// distinct color grade, and enough texture to survive the Briefing screen.
 
 export const SCENARIOS: Scenario[] = [
   // MYSTERY
@@ -8,22 +10,43 @@ export const SCENARIOS: Scenario[] = [
     id: 'last-train',
     title: 'The Last Train',
     genre: 'mystery',
+    logline: 'A stopped train, a stranger\'s ringing phone, and two people who have to decide what to do before it moves again.',
+    synopsis: 'The last train of the night has stopped between stations. No announcement. No movement. A phone left on the seat beside you is ringing, and it hasn\'t stopped for three minutes.',
     opening: "The last train of the night has stopped. No announcement. No movement. Then you notice a phone on the seat next to you — and it's ringing.",
     initialState: { danger: 25, trust: 15, mystery: 60, chaos: 10 },
+    runtime: '9–11 min',
+    toneTags: ['tense', 'nocturnal', 'slow-burn'],
+    castA: { name: 'You', role: 'the one who noticed the phone first', want: 'to get home without whatever this is following you' },
+    castB: { name: 'The stranger in carriage four', role: 'someone who got on two stops after you', want: 'answers, even if they cost something' },
+    grade: { accent: '#C9A24B', accentSoft: 'rgba(201,162,75,0.16)', ink: '#0B0D10', paper: '#EDE6D6' },
   },
   {
     id: 'locked-room',
     title: 'The Locked Room',
     genre: 'mystery',
+    logline: 'You wake up in a hotel room you don\'t remember booking, and the mirror already knows your name.',
+    synopsis: 'You wake up in a hotel room you don\'t remember booking. The door is unlocked. Your wallet is on the table, untouched. But the mirror has a message written on it in marker, and it wasn\'t there when you fell asleep.',
     opening: "You wake up in a hotel room you don't remember booking. The door is unlocked. Your wallet is on the table. But the mirror has a message written on it in marker.",
     initialState: { danger: 30, trust: 10, mystery: 70, chaos: 15 },
+    runtime: '9–11 min',
+    toneTags: ['paranoid', 'claustrophobic', 'twisty'],
+    castA: { name: 'You', role: 'the one who woke up here', want: 'to remember last night before someone else fills in the blanks' },
+    castB: { name: 'The voice on the phone', role: 'someone who already knows what happened', want: 'to see how much you\'ll figure out on your own' },
+    grade: { accent: '#B08D57', accentSoft: 'rgba(176,141,87,0.16)', ink: '#0A0A0D', paper: '#E9E2D3' },
   },
   {
     id: 'missing-message',
     title: 'The Missing Message',
     genre: 'mystery',
+    logline: 'Your phone buzzes with a warning from your own number — one you never sent.',
+    synopsis: 'Your phone buzzes. A message from your own number: "Don\'t go home tonight." You check the sent folder. You definitely didn\'t send it. And whoever did knows exactly where you live.',
     opening: 'Your phone buzzes. A message from your own number: "Don\'t go home tonight." You check — you definitely didn\'t send it.',
     initialState: { danger: 40, trust: 10, mystery: 65, chaos: 20 },
+    runtime: '9–11 min',
+    toneTags: ['urgent', 'paranoid', 'contemporary'],
+    castA: { name: 'You', role: 'the one who got the message', want: 'to find out who sent it before tonight ends' },
+    castB: { name: 'The person who also got it', role: 'someone with the exact same message, sent the exact same minute', want: 'to figure out what the two of you have in common' },
+    grade: { accent: '#C46A4E', accentSoft: 'rgba(196,106,78,0.16)', ink: '#0B0A0C', paper: '#EDE4D8' },
   },
 
   // HORROR
@@ -31,15 +54,29 @@ export const SCENARIOS: Scenario[] = [
     id: 'empty-apartment',
     title: 'The Empty Apartment',
     genre: 'horror',
+    logline: 'You hear footsteps from the apartment above yours. You live on the top floor.',
+    synopsis: 'It\'s 11 PM. You hear footsteps from the apartment above yours — clear, heavy, deliberate. But you live on the top floor. There is nothing above you. There never has been.',
     opening: "It's 11 PM. You hear footsteps from the apartment above yours. Clear, heavy footsteps. But you live on the top floor.",
     initialState: { danger: 55, trust: 10, mystery: 50, chaos: 15 },
+    runtime: '8–10 min',
+    toneTags: ['dread', 'domestic', 'quiet'],
+    castA: { name: 'You', role: 'the one who heard it first', want: 'to convince yourself it\'s nothing before you have to act like it\'s something' },
+    castB: { name: 'The neighbour on the phone', role: 'the only other person awake in the building', want: 'to not be the one who goes up there alone' },
+    grade: { accent: '#8E2F2F', accentSoft: 'rgba(142,47,47,0.18)', ink: '#08090A', paper: '#E3DCD2' },
   },
   {
     id: '3-17-am',
     title: '3:17 AM',
     genre: 'horror',
+    logline: 'Every night this week, at exactly 3:17, something knocks three times. Tonight you\'re ready.',
+    synopsis: 'Every night this week, at exactly 3:17 AM, someone knocks on your door. Three knocks. Always three. Tonight you\'re not going to pretend you\'re asleep.',
     opening: "Every night this week, at exactly 3:17 AM, someone knocks on your door. Three knocks. Always three. Tonight you're ready.",
     initialState: { danger: 60, trust: 5, mystery: 55, chaos: 20 },
+    runtime: '8–10 min',
+    toneTags: ['dread', 'ritual', 'tight'],
+    castA: { name: 'You', role: 'the one who\'s been counting the nights', want: 'to make it stop, whatever that takes' },
+    castB: { name: 'The person one room over', role: 'the one who insists they haven\'t heard anything', want: 'to keep pretending, for both your sakes' },
+    grade: { accent: '#9C3B3B', accentSoft: 'rgba(156,59,59,0.18)', ink: '#09090B', paper: '#E4DCD0' },
   },
 
   // ROMANCE
@@ -47,15 +84,29 @@ export const SCENARIOS: Scenario[] = [
     id: 'last-day-chennai',
     title: 'Last Day in Chennai',
     genre: 'romance',
+    logline: 'You\'re leaving tomorrow morning. Then a message arrives from someone you haven\'t spoken to in three years.',
+    synopsis: 'You\'re leaving Chennai tomorrow morning. You\'ve already packed, already said your goodbyes. Then your phone lights up — a message from someone you haven\'t talked to in three years, and neither of you has ever really explained why.',
     opening: "You're leaving Chennai tomorrow morning. You've already packed. Then your phone lights up — a message from someone you haven't talked to in three years.",
     initialState: { danger: 5, trust: 30, mystery: 20, chaos: 10 },
+    runtime: '10–12 min',
+    toneTags: ['slow-burn', 'bittersweet', 'monsoon'],
+    castA: { name: 'You', role: 'the one who\'s leaving', want: 'one honest conversation before the flight' },
+    castB: { name: 'The one who messaged first', role: 'the one who let three years pass in silence', want: 'to say the thing they never said, if there\'s still time' },
+    grade: { accent: '#C97B93', accentSoft: 'rgba(201,123,147,0.16)', ink: '#100A0D', paper: '#F1E4E4' },
   },
   {
     id: 'wrong-train',
     title: 'The Wrong Train',
     genre: 'romance',
+    logline: 'A stranger asks if this is the Andheri train. It isn\'t. Neither of you moves.',
+    synopsis: 'You sit down on the train. The person next to you looks at the route map, then at you. "This isn\'t the Andheri train, is it?" It isn\'t. Neither of you gets off at the next stop.',
     opening: "You sit down on the train. The person next to you looks at the route map, then at you. \"This isn't the Andheri train, is it?\" It isn't. Neither of you moves.",
     initialState: { danger: 5, trust: 35, mystery: 15, chaos: 15 },
+    runtime: '9–11 min',
+    toneTags: ['warm', 'meet-cute', 'city-night'],
+    castA: { name: 'You', role: 'the one who\'s definitely on the wrong train now', want: 'to keep talking to this person for as long as the excuse lasts' },
+    castB: { name: 'The stranger with the wrong map', role: 'someone who might not actually be lost', want: 'to find out if you\'ll admit you\'re not lost either' },
+    grade: { accent: '#CE8A5E', accentSoft: 'rgba(206,138,94,0.16)', ink: '#0F0B0A', paper: '#F0E5D8' },
   },
 
   // ADVENTURE
@@ -63,15 +114,29 @@ export const SCENARIOS: Scenario[] = [
     id: 'the-island',
     title: 'The Island',
     genre: 'adventure',
+    logline: 'Your boat reaches an island that\'s on no map. Someone has already built a dock.',
+    synopsis: 'Your boat reaches a small island. It\'s not on Google Maps. Not on any map. But someone has built a wooden dock, and there\'s a light coming from somewhere inside the trees.',
     opening: "Your boat reaches a small island. It's not on Google Maps. Not on any map. But someone has built a wooden dock — and there's a light coming from inside the trees.",
     initialState: { danger: 30, trust: 20, mystery: 55, chaos: 15 },
+    runtime: '10–12 min',
+    toneTags: ['exploratory', 'humid', 'wonder'],
+    castA: { name: 'You', role: 'the one who insisted on coming ashore', want: 'to find out who built that dock' },
+    castB: { name: 'Your co-pilot', role: 'the one who wanted to turn back an hour ago', want: 'to get both of you off this island in one piece' },
+    grade: { accent: '#3F8F72', accentSoft: 'rgba(63,143,114,0.16)', ink: '#08100D', paper: '#E3EDE3' },
   },
   {
     id: 'the-rooftop',
     title: 'The Rooftop',
     genre: 'adventure',
+    logline: 'A key taped under your door opens a rooftop you\'ve never seen — and someone\'s already up there.',
+    synopsis: 'You find a key taped underneath your apartment door. No note. You try every lock in your building until the last one opens onto a rooftop you\'ve never seen. Someone is already up there.',
     opening: "You find a key taped underneath your apartment door. No note. You try every lock in your building. The last one opens a door to a rooftop you've never seen — and someone is already up there.",
     initialState: { danger: 20, trust: 20, mystery: 50, chaos: 10 },
+    runtime: '9–11 min',
+    toneTags: ['nocturnal', 'curious', 'skyline'],
+    castA: { name: 'You', role: 'the one holding the key', want: 'to know why it was left for you specifically' },
+    castB: { name: 'The one already on the roof', role: 'someone who\'s clearly been waiting', want: 'to see if you\'d actually come' },
+    grade: { accent: '#4A7C8C', accentSoft: 'rgba(74,124,140,0.16)', ink: '#080B0D', paper: '#E1E8EA' },
   },
 
   // EMOTIONAL
@@ -79,15 +144,29 @@ export const SCENARIOS: Scenario[] = [
     id: 'one-more-call',
     title: 'One More Call',
     genre: 'emotional',
+    logline: 'Your battery says 3%. One person has been trying to reach you all day.',
+    synopsis: 'Your phone battery says 3%. One person has been trying to reach you all day, every hour, without saying why. You have time for one call. Maybe two minutes if you\'re lucky.',
     opening: "Your phone battery says 3%. One person has been trying to reach you all day. You have time for one call. Maybe two minutes if you're lucky.",
     initialState: { danger: 10, trust: 40, mystery: 10, chaos: 5 },
+    runtime: '8–10 min',
+    toneTags: ['tender', 'urgent', 'quiet'],
+    castA: { name: 'You', role: 'the one running out of battery', want: 'to say the right thing while there\'s still time to say it' },
+    castB: { name: 'The one who kept calling', role: 'the one who\'s been trying to reach you all day', want: 'to finally get the words out before the line drops' },
+    grade: { accent: '#7C8FA6', accentSoft: 'rgba(124,143,166,0.16)', ink: '#0A0B0F', paper: '#E6E7EC' },
   },
   {
     id: 'the-photograph',
     title: 'The Photograph',
     genre: 'emotional',
+    logline: 'A photograph from your childhood. A stranger in it. Someone wrote "don\'t forget" on the back.',
+    synopsis: 'While cleaning out your old room, you find a photograph. It\'s you, maybe eight years old, standing next to someone you don\'t recognize. On the back, in handwriting you don\'t recognize either: "Don\'t forget."',
     opening: "While cleaning out your old room, you find a photograph. It's you, maybe eight years old, with someone you don't recognize. But on the back, someone wrote: \"Don't forget.\"",
     initialState: { danger: 5, trust: 30, mystery: 40, chaos: 5 },
+    runtime: '9–11 min',
+    toneTags: ['nostalgic', 'gentle', 'mystery-adjacent'],
+    castA: { name: 'You', role: 'the one who found the photograph', want: 'to remember who\'s standing next to you in it' },
+    castB: { name: 'The person you called about it', role: 'someone who was there, even if you weren\'t supposed to know that', want: 'to decide how much of the truth you actually get' },
+    grade: { accent: '#A88A5C', accentSoft: 'rgba(168,138,92,0.15)', ink: '#0C0A08', paper: '#EDE4D6' },
   },
 
   // COMEDY
@@ -95,15 +174,29 @@ export const SCENARIOS: Scenario[] = [
     id: 'wrong-wedding',
     title: 'Wrong Wedding',
     genre: 'comedy',
+    logline: 'You walked into the wrong wedding. The uncle at the door just called you the groom.',
+    synopsis: 'You walked into the wrong wedding hall. Before you could leave, the uncle at the door grabbed your arm: "The groom is here! Finally!" Everyone starts clapping. You are, technically, not the groom.',
     opening: "You walked into the wrong wedding hall. Before you could leave, the uncle at the door grabbed your arm: \"The groom is here! Finally!\" Everyone starts clapping.",
     initialState: { danger: 10, trust: 25, mystery: 15, chaos: 55 },
+    runtime: '8–10 min',
+    toneTags: ['absurd', 'fast', 'crowd-pleaser'],
+    castA: { name: 'You', role: 'the accidental groom', want: 'to get out before anyone asks a real question' },
+    castB: { name: 'The bridesmaid who noticed first', role: 'the only person here who knows you\'re not him', want: 'to decide whether to blow your cover or help you fake it' },
+    grade: { accent: '#D99A2B', accentSoft: 'rgba(217,154,43,0.18)', ink: '#0D0A05', paper: '#F3E9CF' },
   },
   {
     id: 'the-mayor',
     title: 'The Mayor',
     genre: 'comedy',
+    logline: 'You wake up in a strange town wearing a sash that says MAYOR. You have 47 missed calls.',
+    synopsis: 'You wake up in a small town you\'ve never visited. There\'s a sash on your bed that says "MAYOR." Your phone has 47 missed calls from the town council, and a meeting starts in ten minutes.',
     opening: "You wake up in a small town you've never visited. There's a sash on your bed that says \"MAYOR.\" Your phone has 47 missed calls from the town council.",
     initialState: { danger: 10, trust: 20, mystery: 30, chaos: 60 },
+    runtime: '9–11 min',
+    toneTags: ['absurd', 'chaotic', 'small-town'],
+    castA: { name: 'You', role: 'the accidental Mayor', want: 'to figure out how this happened without losing the job you never asked for' },
+    castB: { name: 'The Deputy Mayor', role: 'the one who\'s suspiciously calm about all of this', want: 'to keep the town running, with or without your help' },
+    grade: { accent: '#C7842E', accentSoft: 'rgba(199,132,46,0.18)', ink: '#0C0906', paper: '#F1E6CE' },
   },
 
   // SCI-FI
@@ -111,8 +204,15 @@ export const SCENARIOS: Scenario[] = [
     id: 'four-minutes',
     title: 'Four Minutes of Oxygen',
     genre: 'scifi',
+    logline: 'Red lights. An alarm you\'ve never heard. Your display reads OXYGEN — 4:00. You\'re alone on Mars. You think.',
+    synopsis: 'You open your eyes to red lights and an alarm you\'ve never heard before. Your helmet display reads OXYGEN — 4:00. You\'re alone on Mars. Or at least, you think you are.',
     opening: "You open your eyes. Red lights. An alarm you've never heard before. Your helmet display reads: OXYGEN — 4:00. You're alone on Mars. Or at least, you think you are.",
     initialState: { danger: 70, trust: 10, mystery: 40, chaos: 30 },
+    runtime: '9–11 min',
+    toneTags: ['high-stakes', 'clinical', 'countdown'],
+    castA: { name: 'You', role: 'the one whose suit is failing', want: 'to make the oxygen last long enough to matter' },
+    castB: { name: 'The voice on the comms', role: 'the only other crew member still responding', want: 'to get you both back to the module before the timer hits zero' },
+    grade: { accent: '#4FA0C9', accentSoft: 'rgba(79,160,201,0.18)', ink: '#06080C', paper: '#DCE7EE' },
   },
 
   // CHAOS
@@ -120,8 +220,15 @@ export const SCENARIOS: Scenario[] = [
     id: 'the-suitcase',
     title: 'The Suitcase',
     genre: 'chaos',
+    logline: 'A suitcase on the bench beside you just moved two inches. Toward you.',
+    synopsis: 'You\'re waiting at the railway station. A suitcase on the bench next to you vibrates. Then it moves. About two inches. Toward you. Nobody else seems to have noticed.',
     opening: "You're waiting at the railway station. A suitcase on the bench next to you vibrates. Then it moves. About two inches. Toward you.",
     initialState: { danger: 35, trust: 15, mystery: 50, chaos: 45 },
+    runtime: '8–10 min',
+    toneTags: ['unhinged', 'fast', 'darkly funny'],
+    castA: { name: 'You', role: 'the one sitting closest to the suitcase', want: 'to find out what\'s inside before it decides for you' },
+    castB: { name: 'The stranger who sat down after it moved', role: 'someone who seems to know more about the suitcase than they\'re letting on', want: 'to get the suitcase — or get away from it, hard to say which' },
+    grade: { accent: '#9450A8', accentSoft: 'rgba(148,80,168,0.18)', ink: '#0A0810', paper: '#E7E0EC' },
   },
 ];
 
@@ -322,6 +429,10 @@ export function pickScenario(excludeIds: string[] = []): Scenario {
   return randomPick(available);
 }
 
+export function getScenario(id: string): Scenario | undefined {
+  return SCENARIOS.find(s => s.id === id);
+}
+
 export function generateSeed() {
   return {
     location: randomPick(LOCATIONS),
@@ -344,6 +455,7 @@ export function pickObjectives(genre: Scenario['genre']): [string, string] {
 }
 
 export function pickWriteRound(): number {
-  // Round 3 or 4 (of 1-6)
-  return Math.random() < 0.5 ? 3 : 4;
+  // The single free-text round lands in Act III (round 5 or 6 of 6),
+  // after the two players have reconverged.
+  return Math.random() < 0.5 ? 5 : 6;
 }

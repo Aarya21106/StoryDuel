@@ -14,12 +14,43 @@ export interface ScenarioSeed {
   object: string;
 }
 
+export interface StoryCharacter {
+  name: string;
+  role: string;
+  want: string;
+}
+
+export interface StoryGrade {
+  accent: string;
+  accentSoft: string;
+  ink: string;
+  paper: string;
+}
+
 export interface Scenario {
   id: string;
   title: string;
   genre: 'mystery' | 'horror' | 'romance' | 'adventure' | 'emotional' | 'comedy' | 'scifi' | 'chaos';
   opening: string;
   initialState: GameState;
+  logline: string;
+  synopsis: string;
+  runtime: string;
+  toneTags: string[];
+  castA: StoryCharacter;
+  castB: StoryCharacter;
+  grade: StoryGrade;
+}
+
+export interface StoryListItem {
+  id: string;
+  title: string;
+  genre: Scenario['genre'];
+  logline: string;
+  synopsis: string;
+  toneTags: string[];
+  runtime: string;
+  grade: StoryGrade;
 }
 
 export interface Session {
@@ -51,6 +82,8 @@ export interface Round {
   session_id: string;
   round_number: number;
   round_type: 'choice' | 'write';
+  pov: 'shared' | 'a' | 'b';
+  beat_kind: 'shared' | 'solo' | 'convergence';
   scene_text: string;
   choices_json: string | null;
   write_prompt: string | null;
@@ -127,9 +160,20 @@ export interface RoundStartPayload {
   roundNumber: number;
   totalRounds: number;
   roundType: 'choice' | 'write';
+  beatKind: 'shared' | 'solo' | 'convergence';
   sceneText: string;
   choices?: string[];
   writePrompt?: string;
+}
+
+export interface StoryBriefPayload {
+  title: string;
+  logline: string;
+  synopsis: string;
+  toneTags: string[];
+  grade: StoryGrade;
+  you: StoryCharacter & { secret: string };
+  them: StoryCharacter;
 }
 
 export interface RoundRevealPayload {
@@ -140,14 +184,19 @@ export interface RoundRevealPayload {
   roundNumber: number;
 }
 
+export interface TranscriptItem {
+  roundNumber: number;
+  beatKind: 'shared' | 'solo' | 'convergence';
+  yourScene: string;
+  yourChoice: string;
+  theirScene?: string;
+  theirChoice?: string;
+  matched: boolean | null;
+}
+
 export interface SessionCompletePayload {
-  transcript: {
-    roundNumber: number;
-    scene: string;
-    yourChoice: string;
-    theirChoice: string;
-    matched: boolean;
-  }[];
+  storyTitle: string;
+  transcript: TranscriptItem[];
   matchCount: number;
   clashCount: number;
   objectives: {

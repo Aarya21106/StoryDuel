@@ -3,62 +3,44 @@ import { PulseButton } from './ui/PulseButton';
 import { Footer } from './ui/Footer';
 
 interface LandingProps {
-  onPlayStranger: (name: string) => void;
-  onInviteFriend: (name: string) => void;
+  onContinue: (name: string) => void;
   onAdminClick: () => void;
 }
 
-export const Landing: React.FC<LandingProps> = ({
-  onPlayStranger,
-  onInviteFriend,
-  onAdminClick,
-}) => {
+export const Landing: React.FC<LandingProps> = ({ onContinue, onAdminClick }) => {
   const [name, setName] = useState('');
   const [error, setError] = useState('');
 
-  const validateName = () => {
+  const handleContinue = () => {
     const trimmed = name.trim();
     if (!trimmed) {
-      setError('Please enter a display name');
-      return null;
+      setError('Tell us what to call you first');
+      return;
     }
     if (trimmed.length > 20) {
-      setError('Name should be under 20 characters');
-      return null;
+      setError('Keep it under 20 characters');
+      return;
     }
-    setError('');
-    return trimmed;
-  };
-
-  const handlePlayStranger = () => {
-    const valid = validateName();
-    if (valid) onPlayStranger(valid);
-  };
-
-  const handleInviteFriend = () => {
-    const valid = validateName();
-    if (valid) onInviteFriend(valid);
+    onContinue(trimmed);
   };
 
   return (
     <div className="screen app-container" style={{ justifyContent: 'space-between' }}>
       <div style={{ width: '100%', paddingTop: '16px' }}>
-        <div style={{ letterSpacing: '0.2em', textTransform: 'uppercase', fontSize: '0.75rem', color: 'var(--accent-coral)', marginBottom: '16px', fontWeight: 600 }}>
-          STORYDUEL
-        </div>
+        <div className="eyebrow" style={{ marginBottom: '16px' }}>StoryDuel</div>
 
         <div className="stagger">
           <h1 style={{ marginBottom: '8px' }}>Two people.</h1>
           <h1 style={{ marginBottom: '8px' }}>One story.</h1>
-          <h1 style={{ color: 'var(--text-muted)', marginBottom: '24px' }}>Zero coordination.</h1>
-          
-          <p className="text-muted" style={{ fontSize: '1.0625rem', marginBottom: '36px', maxWidth: '340px' }}>
-            You and someone else make secret choices. Let's see what story you create together.
+          <h1 style={{ color: 'var(--text-muted)', marginBottom: '24px' }}>Choices that cross.</h1>
+
+          <p className="text-muted" style={{ fontSize: '1.0625rem', marginBottom: '36px', maxWidth: '360px' }}>
+            You and someone else each walk your own side of the same story. What you decide changes what they see. You meet again before the end.
           </p>
         </div>
 
-        <div style={{ width: '100%', marginBottom: '32px' }}>
-          <label style={{ fontSize: '0.8125rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)' }}>
+        <div style={{ width: '100%', marginBottom: '28px' }}>
+          <label style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
             What should we call you?
           </label>
           <input
@@ -70,6 +52,7 @@ export const Landing: React.FC<LandingProps> = ({
               setName(e.target.value);
               if (error) setError('');
             }}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleContinue(); }}
             maxLength={20}
             autoFocus
           />
@@ -80,18 +63,12 @@ export const Landing: React.FC<LandingProps> = ({
           )}
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', width: '100%' }}>
-          <PulseButton variant="primary" onClick={handlePlayStranger}>
-            PLAY WITH SOMEONE
-          </PulseButton>
-
-          <PulseButton variant="secondary" onClick={handleInviteFriend}>
-            WRITE A STORY WITH A FRIEND
-          </PulseButton>
-        </div>
+        <PulseButton variant="primary" onClick={handleContinue}>
+          Continue
+        </PulseButton>
 
         <div style={{ textAlign: 'center', marginTop: '20px', color: 'var(--text-dim)', fontSize: '0.8125rem' }}>
-          3–4 min · No account · Just play
+          A story library awaits · no account needed
         </div>
       </div>
 

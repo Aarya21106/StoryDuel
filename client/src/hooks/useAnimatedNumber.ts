@@ -6,8 +6,8 @@ import { useState, useEffect, useRef } from 'react';
  */
 export function useAnimatedNumber(target: number, duration: number = 2000, start: boolean = true): number {
   const [value, setValue] = useState(0);
-  const frameRef = useRef<number>();
-  const startTimeRef = useRef<number>();
+  const frameRef = useRef<number | undefined>(undefined);
+  const startTimeRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     if (!start || target === 0) return;

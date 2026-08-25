@@ -15,7 +15,7 @@ export const ReplayPrompt: React.FC<ReplayPromptProps> = ({
   return (
     <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '16px', textAlign: 'center' }}>
       <PulseButton variant="primary" onClick={onPlayAgain}>
-        PLAY AGAIN (NEW STORY)
+        Choose another story
       </PulseButton>
 
       <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
@@ -23,7 +23,7 @@ export const ReplayPrompt: React.FC<ReplayPromptProps> = ({
       </div>
 
       <PulseButton variant="secondary" onClick={onInviteFriend}>
-        INVITE A FRIEND
+        Invite a friend
       </PulseButton>
 
       <div style={{ marginTop: '16px' }}>
@@ -38,7 +38,7 @@ export const ReplayPrompt: React.FC<ReplayPromptProps> = ({
             padding: '4px',
           }}
         >
-          ⚑ Report inappropriate story content
+          Report inappropriate story content
         </button>
       </div>
     </div>

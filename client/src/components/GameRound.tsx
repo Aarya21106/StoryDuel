@@ -10,6 +10,7 @@ interface GameRoundProps {
   round: RoundData;
   partnerLocked: boolean;
   myLockedChoice: string | null;
+  laneMessage: string | null;
   onSubmitChoice: (choice: string) => void;
 }
 
@@ -17,11 +18,11 @@ export const GameRound: React.FC<GameRoundProps> = ({
   round,
   partnerLocked,
   myLockedChoice,
+  laneMessage,
   onSubmitChoice,
 }) => {
   const [selectedChoice, setSelectedChoice] = useState<string | null>(myLockedChoice);
   const [writeText, setWriteText] = useState('');
-  const [isTypingComplete, setIsTypingComplete] = useState(false);
 
   const handleSelectChoice = (choice: string) => {
     if (selectedChoice) return; // already locked
@@ -39,25 +40,32 @@ export const GameRound: React.FC<GameRoundProps> = ({
   };
 
   const isWriteRound = round.roundType === 'write';
+  const isSolo = round.beatKind === 'solo';
 
   return (
     <div className="screen app-container" style={{ justifyContent: 'space-between' }}>
       <div style={{ width: '100%' }}>
         {/* Header with Progress */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '28px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
           <ProgressDots currentRound={round.roundNumber} totalRounds={round.totalRounds} />
           <span className="font-mono text-muted" style={{ fontSize: '0.75rem' }}>
-            ROUND {round.roundNumber} / {round.totalRounds}
+            {round.roundNumber} / {round.totalRounds}
+          </span>
+        </div>
+
+        <div style={{ marginBottom: '20px' }}>
+          <span className={`beat-badge ${isSolo ? 'solo' : ''}`}>
+            <span className="dot" />
+            {isSolo ? 'Your path alone' : round.beatKind === 'convergence' ? 'Paths cross again' : 'Together'}
           </span>
         </div>
 
         {/* Scene Text */}
-        <div style={{ marginBottom: '36px', minHeight: '90px' }}>
+        <div className="ken-burns" style={{ marginBottom: '32px', minHeight: '100px', overflow: 'hidden' }}>
           <TypewriterText
             text={round.sceneText}
-            speed={20}
-            className="font-display"
-            onComplete={() => setIsTypingComplete(true)}
+            speed={32}
+            className="scene-text"
           />
         </div>
 
@@ -90,7 +98,7 @@ export const GameRound: React.FC<GameRoundProps> = ({
               variant="primary"
               disabled={writeText.trim().length < 20 || !!selectedChoice}
             >
-              {selectedChoice ? 'LOCKED IN 🔒' : 'LOCK IT IN'}
+              {selectedChoice ? 'Sealed' : 'Lock it in'}
             </PulseButton>
           </form>
         ) : (
@@ -106,9 +114,12 @@ export const GameRound: React.FC<GameRoundProps> = ({
                   selected={isSelected}
                   onClick={() => handleSelectChoice(choice)}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span>{choice}</span>
-                    {isSelected && <span className="lock-label">LOCKED 🔒</span>}
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span>{choice}</span>
+                      {isSelected && <span className="lock-label">Sealed</span>}
+                    </div>
+                    {isSelected && <span className="seal-underline" />}
                   </div>
                 </GlassCard>
               );
@@ -119,13 +130,18 @@ export const GameRound: React.FC<GameRoundProps> = ({
 
       {/* Partner Status Footer */}
       <div style={{ width: '100%', paddingTop: '24px', textAlign: 'center' }}>
-        {selectedChoice ? (
+        {isSolo ? (
+          <div className="waiting-indicator" style={{ justifyContent: 'center', opacity: selectedChoice ? 1 : 0 }}>
+            <div className="waiting-dot" />
+            <span>{laneMessage || 'Carrying this choice forward...'}</span>
+          </div>
+        ) : selectedChoice ? (
           <div className="waiting-indicator" style={{ justifyContent: 'center' }}>
             <div className="waiting-dot" />
             <span>
               {partnerLocked
-                ? 'Both locked in! Revealing...'
-                : "Your choice is locked. They're still deciding..."}
+                ? 'Both sealed. Revealing what happened...'
+                : "Your choice is sealed. They're still deciding..."}
             </span>
           </div>
         ) : (
@@ -133,7 +149,7 @@ export const GameRound: React.FC<GameRoundProps> = ({
             <div className="waiting-dot" />
             <span>
               {partnerLocked
-                ? "They're locked in! Your turn."
+                ? "They're sealed in. Your turn."
                 : "They're deciding too..."}
             </span>
           </div>

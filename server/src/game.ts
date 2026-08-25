@@ -1,15 +1,40 @@
 import { v4 as uuid } from 'uuid';
 import * as db from './db.js';
-import { pickScenario, generateSeed, pickObjectives, pickWriteRound } from './scenarios.js';
+import { pickScenario, getScenario, generateSeed, pickObjectives, pickWriteRound, SCENARIOS } from './scenarios.js';
 import { getFallbackBeat } from './fallbacks.js';
 import { generateRoundScene, generateFinalAnalysis, fallbackAnalysis } from './ai.js';
 import { pickAIChoice, pickAIWriteResponse, getAIDelay } from './aiPlayer.js';
 import { moderateText } from './moderation.js';
-import type { GameState, AIRoundResponse, RoundStartPayload, RoundRevealPayload, SessionCompletePayload } from './types.js';
+import type {
+  GameState, AIRoundResponse, RoundStartPayload, RoundRevealPayload,
+  SessionCompletePayload, StoryBriefPayload, TranscriptItem,
+} from './types.js';
 
 const TOTAL_ROUNDS = 6;
 
-// ── Match Reaction Phrases ──
+// A handful of fallback beats were originally authored assuming a
+// different round held the free-text beat, and ship with an empty
+// choices array. If a fallback beat is used for a 'choice' round and
+// has no choices, fall back to these instead of showing an empty round.
+const GENERIC_CHOICES = [
+  'Move toward whatever just happened.',
+  'Hold your ground and watch closely.',
+  'Get out before it goes any further.',
+];
+
+// Round map:
+//   1        shared    — the opening, together
+//   2, 3     solo      — each player walks their own lane, apart
+//   4        convergence — shared scene, paths cross again
+//   5, 6     shared    — together again for the close (one is a write beat)
+
+function beatKindForRound(roundNumber: number): 'shared' | 'solo' | 'convergence' {
+  if (roundNumber === 2 || roundNumber === 3) return 'solo';
+  if (roundNumber === 4) return 'convergence';
+  return 'shared';
+}
+
+// ── Reaction Phrases ──
 
 const MATCH_REACTIONS = [
   "Same brain.",
@@ -60,14 +85,18 @@ function applyDelta(state: GameState, delta: Partial<GameState>): GameState {
   };
 }
 
+function povOf(players: any[], playerId: string): 'a' | 'b' {
+  return players[0]?.id === playerId ? 'a' : 'b';
+}
+
 // ── GameManager ──
 
 export class GameManager {
 
   /**
-   * Create a new game session (stranger or friend mode).
+   * Create a new game session (stranger or friend mode), for a chosen story.
    */
-  createSession(mode: 'stranger' | 'friend'): {
+  createSession(mode: 'stranger' | 'friend', storyId?: string): {
     sessionId: string;
     inviteCode: string | null;
     scenario: { id: string; title: string; genre: string; opening: string };
@@ -77,7 +106,7 @@ export class GameManager {
     initialState: GameState;
   } {
     const sessionId = uuid();
-    const scenario = pickScenario();
+    const scenario = (storyId && getScenario(storyId)) || pickScenario();
     const seed = generateSeed();
     const writeRound = pickWriteRound();
     const objectives = pickObjectives(scenario.genre);
@@ -105,115 +134,144 @@ export class GameManager {
   }
 
   /**
-   * Add a player to a session.
+   * Add a player to a session. First player added becomes POV 'a', second 'b'.
    */
   addPlayer(sessionId: string, displayName: string, isAI: boolean, objective: string, socketId: string | null): string {
     const playerId = uuid();
+    const session = db.getSession(sessionId);
+    const scenario = getScenario(session.scenario_id);
+    const existing = db.getPlayers(sessionId);
+    const castSlot = existing.length === 0 ? scenario?.castA : scenario?.castB;
+
     db.createPlayer({
       id: playerId,
       session_id: sessionId,
       display_name: displayName,
       is_ai: isAI ? 1 : 0,
       secret_objective: objective,
+      character_role: castSlot?.role || '',
+      character_want: castSlot?.want || '',
       socket_id: socketId,
     });
     return playerId;
   }
 
   /**
-   * Start the game — activate session and generate the first round.
+   * Build the pre-game Briefing payload for one player: the situation, who
+   * they are (with their real secret), and who the other lead is (no secret).
+   */
+  buildStoryBrief(sessionId: string, playerId: string): StoryBriefPayload {
+    const session = db.getSession(sessionId);
+    const scenario = getScenario(session.scenario_id)!;
+    const players = db.getPlayers(sessionId);
+    const me = players.find((p: any) => p.id === playerId);
+    const partner = players.find((p: any) => p.id !== playerId);
+    const pov = povOf(players, playerId);
+    const myCast = pov === 'a' ? scenario.castA : scenario.castB;
+    const theirCast = pov === 'a' ? scenario.castB : scenario.castA;
+
+    return {
+      title: scenario.title,
+      logline: scenario.logline,
+      synopsis: scenario.synopsis,
+      toneTags: scenario.toneTags,
+      grade: scenario.grade,
+      you: {
+        name: myCast.name,
+        role: myCast.role,
+        want: myCast.want,
+        secret: me?.secret_objective || '',
+      },
+      them: {
+        name: partner ? theirCast.name : theirCast.name,
+        role: theirCast.role,
+        want: theirCast.want,
+      },
+    };
+  }
+
+  /**
+   * Start the game — activate session and generate the first (shared) round.
    */
   async startGame(sessionId: string): Promise<RoundStartPayload> {
     db.updateSessionStatus(sessionId, 'active');
     db.trackEvent('started', sessionId);
-    return this.generateNextRound(sessionId, 1);
+    return this.generateSharedRound(sessionId, 1);
   }
 
   /**
-   * Generate the next round's scene and choices.
+   * Generate a SHARED beat: the opening (1), the convergence (4), or a joint
+   * closing beat (5, 6). Both players see identical content.
    */
-  async generateNextRound(sessionId: string, roundNumber: number): Promise<RoundStartPayload> {
+  async generateSharedRound(sessionId: string, roundNumber: number): Promise<RoundStartPayload> {
     const session = db.getSession(sessionId);
+    const scenario = getScenario(session.scenario_id)!;
     const currentState: GameState = JSON.parse(session.game_state);
     const seed = JSON.parse(session.scenario_seed);
     const isWriteRound = roundNumber === session.write_round;
     const roundType = isWriteRound ? 'write' : 'choice';
+    const beatKind = beatKindForRound(roundNumber);
 
-    // Build history from previous rounds
-    const rounds = db.getRounds(sessionId);
-    const history = rounds.map((r: any) => {
-      const choices = db.getChoicesForRound(r.id);
-      return {
-        round: r.round_number,
-        scene: r.scene_text,
-        playerAChoice: choices[0]?.choice_text || '',
-        playerBChoice: choices[1]?.choice_text || '',
-      };
-    });
-
-    // Get scenario for title
-    const scenario = pickScenario([]).id === session.scenario_id
-      ? pickScenario([])
-      : { title: session.scenario_id, id: session.scenario_id };
+    const history = this.buildSharedHistory(sessionId, roundNumber);
 
     let sceneData: AIRoundResponse | null = null;
 
-    // For round 1, use the scenario opening
     if (roundNumber === 1) {
-      const scenarioData = (await import('./scenarios.js')).SCENARIOS.find(s => s.id === session.scenario_id);
-      const opening = scenarioData?.opening || 'Something strange is happening.';
-      const fallback = getFallbackBeat(session.scenario_id, 1, isWriteRound);
-
       sceneData = {
-        scene: opening,
-        choices: isWriteRound ? undefined : fallback.choices,
-        write_prompt: isWriteRound ? fallback.writePrompt : undefined,
+        scene: scenario.opening,
+        choices: isWriteRound ? undefined : getFallbackBeat(scenario.id, 1, false).choices,
+        write_prompt: isWriteRound ? getFallbackBeat(scenario.id, 1, true).writePrompt : undefined,
         state_delta: { danger: 0, trust: 0, mystery: 0, chaos: 0 },
       };
     } else {
-      // Try AI generation
       sceneData = await generateRoundScene({
-        scenarioTitle: session.scenario_id,
+        scenarioTitle: scenario.title,
         seed,
         currentState,
         history,
         roundNumber,
         roundType,
+        beatKind,
+        povCharacterName: scenario.castA.name,
+        otherCharacterName: scenario.castB.name,
       });
 
-      // Retry once on failure
       if (!sceneData) {
         sceneData = await generateRoundScene({
-          scenarioTitle: session.scenario_id,
+          scenarioTitle: scenario.title,
           seed,
           currentState,
           history,
           roundNumber,
           roundType,
+          beatKind,
+          povCharacterName: scenario.castA.name,
+          otherCharacterName: scenario.castB.name,
         });
       }
     }
 
-    // Final fallback
     let isFallback = 0;
     if (!sceneData) {
       isFallback = 1;
-      const fallback = getFallbackBeat(session.scenario_id, roundNumber, isWriteRound);
+      const fallback = getFallbackBeat(scenario.id, roundNumber, isWriteRound);
+      const safeChoices = fallback.choices && fallback.choices.length > 0 ? fallback.choices : GENERIC_CHOICES;
       sceneData = {
         scene: fallback.scene,
-        choices: isWriteRound ? undefined : fallback.choices,
-        write_prompt: isWriteRound ? fallback.writePrompt : undefined,
+        choices: isWriteRound ? undefined : safeChoices,
+        write_prompt: isWriteRound ? (fallback.writePrompt || 'What do you say?') : undefined,
         state_delta: fallback.stateDelta,
       };
     }
 
-    // Save round
     const roundId = uuid();
     db.createRound({
       id: roundId,
       session_id: sessionId,
       round_number: roundNumber,
       round_type: roundType,
+      pov: 'shared',
+      beat_kind: beatKind,
       scene_text: sceneData.scene,
       choices_json: sceneData.choices ? JSON.stringify(sceneData.choices) : null,
       write_prompt: sceneData.write_prompt || null,
@@ -221,7 +279,6 @@ export class GameManager {
       is_fallback: isFallback,
     });
 
-    // Apply state delta
     const newState = applyDelta(currentState, sceneData.state_delta);
     db.updateSessionGameState(sessionId, JSON.stringify(newState));
     db.updateRoundStateAfter(roundId, JSON.stringify(newState));
@@ -232,6 +289,7 @@ export class GameManager {
       roundNumber,
       totalRounds: TOTAL_ROUNDS,
       roundType,
+      beatKind,
       sceneText: sceneData.scene,
       choices: sceneData.choices,
       writePrompt: sceneData.write_prompt,
@@ -239,18 +297,138 @@ export class GameManager {
   }
 
   /**
-   * Submit a player's choice for a round.
-   * Returns true if both players have now submitted.
+   * Generate a SOLO beat (rounds 2, 3) for exactly one player, built only
+   * from that player's own lane. The other player never sees this content
+   * until the final reveal.
+   */
+  async generateSoloRound(sessionId: string, playerId: string, roundNumber: number): Promise<RoundStartPayload> {
+    const session = db.getSession(sessionId);
+    const scenario = getScenario(session.scenario_id)!;
+    const currentState: GameState = JSON.parse(session.game_state);
+    const seed = JSON.parse(session.scenario_seed);
+    const players = db.getPlayers(sessionId);
+    const pov = povOf(players, playerId);
+    const myCast = pov === 'a' ? scenario.castA : scenario.castB;
+    const theirCast = pov === 'a' ? scenario.castB : scenario.castA;
+
+    const history = this.buildSoloHistory(sessionId, pov, roundNumber);
+
+    let sceneData = await generateRoundScene({
+      scenarioTitle: scenario.title,
+      seed,
+      currentState,
+      history,
+      roundNumber,
+      roundType: 'choice',
+      beatKind: 'solo',
+      povCharacterName: myCast.name,
+      otherCharacterName: theirCast.name,
+    });
+
+    if (!sceneData) {
+      sceneData = await generateRoundScene({
+        scenarioTitle: scenario.title,
+        seed,
+        currentState,
+        history,
+        roundNumber,
+        roundType: 'choice',
+        beatKind: 'solo',
+        povCharacterName: myCast.name,
+        otherCharacterName: theirCast.name,
+      });
+    }
+
+    let isFallback = 0;
+    if (!sceneData) {
+      isFallback = 1;
+      const fallback = getFallbackBeat(scenario.id, roundNumber, false);
+      sceneData = {
+        scene: fallback.scene,
+        choices: fallback.choices && fallback.choices.length > 0 ? fallback.choices : GENERIC_CHOICES,
+        state_delta: fallback.stateDelta,
+      };
+    }
+
+    const roundId = uuid();
+    db.createRound({
+      id: roundId,
+      session_id: sessionId,
+      round_number: roundNumber,
+      round_type: 'choice',
+      pov,
+      beat_kind: 'solo',
+      scene_text: sceneData.scene,
+      choices_json: sceneData.choices ? JSON.stringify(sceneData.choices) : null,
+      write_prompt: null,
+      state_before: JSON.stringify(currentState),
+      is_fallback: isFallback,
+    });
+
+    // Solo lanes still nudge the shared mood meter, halved so two lanes
+    // don't double-count the swing.
+    const halvedDelta = Object.fromEntries(
+      Object.entries(sceneData.state_delta).map(([k, v]) => [k, Math.round((v as number) / 2)]),
+    );
+    const newState = applyDelta(currentState, halvedDelta);
+    db.updateSessionGameState(sessionId, JSON.stringify(newState));
+    db.updateRoundStateAfter(roundId, JSON.stringify(newState));
+    db.updatePlayerCurrentRound(playerId, roundNumber);
+
+    return {
+      roundId,
+      roundNumber,
+      totalRounds: TOTAL_ROUNDS,
+      roundType: 'choice',
+      beatKind: 'solo',
+      sceneText: sceneData.scene,
+      choices: sceneData.choices,
+    };
+  }
+
+  private buildSharedHistory(sessionId: string, upToRoundNumber: number) {
+    const rounds = db.getRounds(sessionId).filter((r: any) => r.round_number < upToRoundNumber);
+    return rounds.map((r: any) => {
+      const choices = db.getChoicesForRound(r.id);
+      return {
+        round: r.round_number,
+        scene: r.scene_text,
+        playerAChoice: choices[0]?.choice_text || '',
+        playerBChoice: choices[1]?.choice_text || '',
+      };
+    });
+  }
+
+  private buildSoloHistory(sessionId: string, pov: 'a' | 'b', upToRoundNumber: number) {
+    const all = db.getRounds(sessionId);
+    const relevant = all.filter((r: any) =>
+      r.round_number < upToRoundNumber && (r.pov === 'shared' || r.pov === pov),
+    );
+    return relevant.map((r: any) => {
+      const choices = db.getChoicesForRound(r.id);
+      const mine = choices[0]?.choice_text || '';
+      return {
+        round: r.round_number,
+        scene: r.scene_text,
+        playerAChoice: mine,
+        playerBChoice: '',
+      };
+    });
+  }
+
+  /**
+   * Submit a player's choice for a round. For shared/convergence rounds this
+   * needs both players; for solo rounds it's complete the instant they submit.
    */
   submitChoice(roundId: string, playerId: string, choiceText: string): {
-    bothSubmitted: boolean;
+    complete: boolean;
     isModerated: boolean;
+    pov: string;
   } {
     const round = db.getRound(roundId);
     let finalText = choiceText;
     let isModerated = 0;
 
-    // Moderate write round text
     if (round.round_type === 'write') {
       const result = moderateText(choiceText);
       finalText = result.cleaned;
@@ -266,19 +444,17 @@ export class GameManager {
     });
 
     const choices = db.getChoicesForRound(roundId);
-    return {
-      bothSubmitted: choices.length >= 2,
-      isModerated: isModerated === 1,
-    };
+    const complete = round.pov === 'shared' ? choices.length >= 2 : choices.length >= 1;
+
+    return { complete, isModerated: isModerated === 1, pov: round.pov };
   }
 
   /**
-   * Generate the round reveal payload.
+   * Generate the round reveal payload for a shared/convergence round.
    */
   getRoundReveal(roundId: string, requestingPlayerId: string): RoundRevealPayload {
     const round = db.getRound(roundId);
     const choices = db.getChoicesForRound(roundId);
-    const players = db.getPlayers(round.session_id);
 
     const myChoice = choices.find((c: any) => c.player_id === requestingPlayerId);
     const theirChoice = choices.find((c: any) => c.player_id !== requestingPlayerId);
@@ -295,54 +471,111 @@ export class GameManager {
   }
 
   /**
+   * Which lane (a/b) a player occupies in a session.
+   */
+  povOfPlayer(sessionId: string, playerId: string): 'a' | 'b' {
+    const players = db.getPlayers(sessionId);
+    return povOf(players, playerId);
+  }
+
+  /**
+   * Whether a lane (a/b) has actually submitted its round-3 solo choice.
+   */
+  laneComplete(sessionId: string, pov: 'a' | 'b'): boolean {
+    const round3 = db.getRoundBySessionAndNumber(sessionId, 3, pov);
+    if (!round3) return false;
+    return db.getChoicesForRound(round3.id).length >= 1;
+  }
+
+  /**
    * Check if the game is over after this round.
    */
   isGameOver(roundNumber: number): boolean {
     return roundNumber >= TOTAL_ROUNDS;
   }
 
+  beatKindForRound(roundNumber: number) {
+    return beatKindForRound(roundNumber);
+  }
+
   /**
-   * Generate the final session results.
+   * Generate the final session results, including both players' full lanes
+   * so each side gets an accurate, non-inverted transcript of their own
+   * choices vs. the other lead's — and the big reveal of what happened in
+   * the solo rounds they never saw.
    */
-  async generateResults(sessionId: string): Promise<SessionCompletePayload> {
+  async generateResults(sessionId: string): Promise<SessionCompletePayload & { transcriptFor: (playerId: string) => TranscriptItem[] }> {
     const session = db.getSession(sessionId);
+    const scenario = getScenario(session.scenario_id)!;
     const players = db.getPlayers(sessionId);
     const rounds = db.getRounds(sessionId);
 
     const playerA = players[0];
     const playerB = players[1];
 
-    // Build transcript
     let matchCount = 0;
     let clashCount = 0;
-    const transcript: SessionCompletePayload['transcript'] = [];
+
+    // roundNumber -> { a: {scene, choice}, b: {scene, choice}, beatKind, matched }
+    const laneMap = new Map<number, {
+      beatKind: 'shared' | 'solo' | 'convergence';
+      a: { scene: string; choice: string };
+      b: { scene: string; choice: string };
+      matched: boolean | null;
+    }>();
 
     for (const round of rounds) {
       const choices = db.getChoicesForRound(round.id);
-      const choiceA = choices.find((c: any) => c.player_id === playerA.id);
-      const choiceB = choices.find((c: any) => c.player_id === playerB.id);
-      const matched = choiceA?.choice_text === choiceB?.choice_text;
+      const entry = laneMap.get(round.round_number) || {
+        beatKind: round.beat_kind,
+        a: { scene: '', choice: '' },
+        b: { scene: '', choice: '' },
+        matched: null as boolean | null,
+      };
 
-      if (matched) matchCount++;
-      else clashCount++;
+      if (round.pov === 'shared') {
+        const choiceA = choices.find((c: any) => c.player_id === playerA.id);
+        const choiceB = choices.find((c: any) => c.player_id === playerB.id);
+        const matched = choiceA?.choice_text === choiceB?.choice_text;
+        entry.a = { scene: round.scene_text, choice: choiceA?.choice_text || '' };
+        entry.b = { scene: round.scene_text, choice: choiceB?.choice_text || '' };
+        entry.matched = matched;
+        if (matched) matchCount++; else clashCount++;
+      } else if (round.pov === 'a') {
+        entry.a = { scene: round.scene_text, choice: choices[0]?.choice_text || '' };
+        entry.matched = null;
+      } else if (round.pov === 'b') {
+        entry.b = { scene: round.scene_text, choice: choices[0]?.choice_text || '' };
+        entry.matched = null;
+      }
 
-      transcript.push({
-        roundNumber: round.round_number,
-        scene: round.scene_text,
-        yourChoice: choiceA?.choice_text || '',
-        theirChoice: choiceB?.choice_text || '',
-        matched,
-      });
+      laneMap.set(round.round_number, entry);
     }
 
-    // Generate AI analysis
+    const orderedRoundNumbers = Array.from(laneMap.keys()).sort((x, y) => x - y);
+
+    const buildFor = (viewerIsA: boolean): TranscriptItem[] => {
+      return orderedRoundNumbers.map((rn) => {
+        const lane = laneMap.get(rn)!;
+        const mine = viewerIsA ? lane.a : lane.b;
+        const theirs = viewerIsA ? lane.b : lane.a;
+        return {
+          roundNumber: rn,
+          beatKind: lane.beatKind,
+          yourScene: mine.scene,
+          yourChoice: mine.choice,
+          theirScene: theirs.scene || undefined,
+          theirChoice: theirs.choice || undefined,
+          matched: lane.matched,
+        };
+      });
+    };
+
     let analysis = await generateFinalAnalysis({
-      transcript: transcript.map(t => ({
-        round: t.roundNumber,
-        scene: t.scene,
-        playerAChoice: t.yourChoice,
-        playerBChoice: t.theirChoice,
-      })),
+      transcript: orderedRoundNumbers.map((rn) => {
+        const lane = laneMap.get(rn)!;
+        return { round: rn, scene: lane.a.scene || lane.b.scene, playerAChoice: lane.a.choice, playerBChoice: lane.b.choice };
+      }),
       playerAName: playerA.display_name,
       playerBName: playerB.display_name,
       playerAObjective: playerA.secret_objective,
@@ -351,12 +584,10 @@ export class GameManager {
       clashCount,
     });
 
-    // Fallback if AI analysis fails
     if (!analysis) {
       analysis = fallbackAnalysis(matchCount, clashCount, TOTAL_ROUNDS);
     }
 
-    // Save results
     db.saveResult({
       id: uuid(),
       session_id: sessionId,
@@ -370,8 +601,9 @@ export class GameManager {
     db.updateSessionStatus(sessionId, 'completed');
     db.trackEvent('completed', sessionId);
 
-    return {
-      transcript,
+    const base = {
+      storyTitle: scenario.title,
+      transcript: buildFor(true),
       matchCount,
       clashCount,
       objectives: {
@@ -384,6 +616,11 @@ export class GameManager {
       partnerIsAI: playerB.is_ai === 1,
       partnerName: playerB.display_name,
       sessionId,
+    };
+
+    return {
+      ...base,
+      transcriptFor: (playerId: string) => (playerId === playerA.id ? buildFor(true) : buildFor(false)),
     };
   }
 
@@ -416,12 +653,12 @@ export class GameManager {
   }
 
   /**
-   * Record a human/AI guess.
+   * Record a human/AI guess made by `guessingPlayerId` about their partner.
    */
-  recordGuess(sessionId: string, guess: 'human' | 'ai'): { correct: boolean; partnerIsAI: boolean; explanation: string } {
+  recordGuess(sessionId: string, guessingPlayerId: string, guess: 'human' | 'ai'): { correct: boolean; partnerIsAI: boolean; explanation: string } {
     const players = db.getPlayers(sessionId);
-    const partner = players.find((p: any) => p.is_ai !== undefined);
-    const partnerIsAI = players.some((p: any) => p.is_ai === 1);
+    const partner = players.find((p: any) => p.id !== guessingPlayerId);
+    const partnerIsAI = partner?.is_ai === 1;
 
     const correct = (guess === 'ai' && partnerIsAI) || (guess === 'human' && !partnerIsAI);
 

@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
-import { PulseButton } from './ui/PulseButton';
-import { copyToClipboard, shareResult } from '../utils/share';
+import { shareResult } from '../utils/share';
 
 interface ShareCardProps {
   sessionId: string;
   myDisplayName: string;
   partnerName: string;
+  storyTitle: string;
   chemistryScore: number;
 }
 
@@ -13,15 +13,16 @@ export const ShareCard: React.FC<ShareCardProps> = ({
   sessionId,
   myDisplayName,
   partnerName,
+  storyTitle,
   chemistryScore,
 }) => {
   const [copied, setCopied] = useState(false);
   const cardSvgUrl = `/api/card/${sessionId}`;
-  const shareText = `We created a story on StoryDuel without talking! Our Story Chemistry is ${chemistryScore}%. Can you beat our score?`;
+  const shareText = `${myDisplayName} and I just told "${storyTitle}" on StoryDuel without talking. Our story synergy: ${chemistryScore}%. Can you tell it the same way?`;
   const shareUrl = `${window.location.origin}?ref=${sessionId}`;
 
   const handleShare = async () => {
-    const success = await shareResult('StoryDuel Result', shareText, shareUrl);
+    const success = await shareResult('StoryDuel', shareText, shareUrl);
     if (success) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2500);
@@ -29,13 +30,12 @@ export const ShareCard: React.FC<ShareCardProps> = ({
   };
 
   const handleDownload = () => {
-    // Create an image from SVG and draw to Canvas for PNG download
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
       const canvas = document.createElement('canvas');
       canvas.width = 400;
-      canvas.height = 560;
+      canvas.height = 580;
       const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.drawImage(img, 0, 0);
@@ -50,11 +50,10 @@ export const ShareCard: React.FC<ShareCardProps> = ({
 
   return (
     <div style={{ width: '100%', marginBottom: '36px' }}>
-      <div style={{ fontSize: '0.6875rem', textTransform: 'uppercase', letterSpacing: '0.15em', color: 'var(--text-muted)', marginBottom: '12px', textAlign: 'center' }}>
-        STORYDUEL SHARE CARD
+      <div className="eyebrow" style={{ marginBottom: '12px', textAlign: 'center' }}>
+        Your story card
       </div>
 
-      {/* Embedded SVG Preview */}
       <div
         className="glass-card"
         style={{
@@ -68,18 +67,17 @@ export const ShareCard: React.FC<ShareCardProps> = ({
       >
         <img
           src={cardSvgUrl}
-          alt="StoryDuel Result Card"
-          style={{ width: '100%', maxWidth: '320px', height: 'auto', borderRadius: '12px' }}
+          alt="StoryDuel result card"
+          style={{ width: '100%', maxWidth: '320px', height: 'auto', borderRadius: '10px' }}
         />
       </div>
 
-      {/* Share Actions */}
       <div className="share-buttons">
         <button className="share-btn" onClick={handleDownload}>
-          📥 Download PNG
+          Download card
         </button>
         <button className="share-btn" onClick={handleShare}>
-          {copied ? '✓ Link Copied' : '📤 Share Result'}
+          {copied ? 'Link copied' : 'Share the story'}
         </button>
       </div>
     </div>

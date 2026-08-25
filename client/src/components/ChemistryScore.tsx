@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { useAnimatedNumber } from '../hooks/useAnimatedNumber';
-import { ParticleBurst } from './ui/ParticleBurst';
 import type { DimensionBreakdown } from '../hooks/useGame';
 
 interface ChemistryScoreProps {
@@ -10,23 +9,21 @@ interface ChemistryScoreProps {
 }
 
 export const ChemistryScore: React.FC<ChemistryScoreProps> = ({ score, insight, breakdown }) => {
-  const animatedScore = useAnimatedNumber(score, 1800, true);
+  const animatedScore = useAnimatedNumber(score, 1600, true);
   const [showBreakdown, setShowBreakdown] = useState(false);
 
   return (
-    <div style={{ width: '100%', textAlign: 'center', marginBottom: '36px' }}>
-      <ParticleBurst trigger={score >= 70} colorType="all" />
+    <div style={{ width: '100%', textAlign: 'center', marginBottom: '36px', position: 'relative' }}>
+      {score >= 70 && <div className="glow-pulse" />}
 
       <div className={`chemistry-score ${score >= 70 ? 'glow' : ''}`}>
         {animatedScore}%
       </div>
-      <div className="chemistry-label">Story Chemistry</div>
+      <div className="chemistry-label">Story Synergy</div>
 
-      <div className="glass-card" style={{ marginTop: '24px', textAlign: 'left', borderColor: 'rgba(255, 107, 74, 0.2)' }}>
-        <div style={{ fontSize: '0.6875rem', textTransform: 'uppercase', color: 'var(--accent-coral)', letterSpacing: '0.1em', fontWeight: 600, marginBottom: '6px' }}>
-          AI INSIGHT
-        </div>
-        <p style={{ fontSize: '0.9375rem', lineHeight: '1.5', color: 'var(--text-cream)' }}>
+      <div className="glass-card" style={{ marginTop: '24px', textAlign: 'left', borderColor: 'var(--accent-soft)' }}>
+        <div className="eyebrow" style={{ marginBottom: '8px' }}>The closing line</div>
+        <p style={{ fontSize: '1.0625rem', lineHeight: '1.55', color: 'var(--text-cream)', fontFamily: 'var(--font-serif)', fontStyle: 'italic' }}>
           "{insight}"
         </p>
       </div>
@@ -37,32 +34,32 @@ export const ChemistryScore: React.FC<ChemistryScoreProps> = ({ score, insight, 
           style={{
             background: 'none',
             border: 'none',
-            color: 'var(--accent-violet)',
+            color: 'var(--accent)',
             cursor: 'pointer',
             fontSize: '0.8125rem',
             fontWeight: 500,
             padding: '6px 12px',
           }}
         >
-          {showBreakdown ? 'Hide breakdown ↑' : 'See breakdown →'}
+          {showBreakdown ? 'Hide the breakdown' : 'See the breakdown'}
         </button>
 
         {showBreakdown && (
           <div className="glass-card stagger" style={{ marginTop: '12px', textAlign: 'left' }}>
             <div className="breakdown-item">
-              <span className="text-muted" style={{ fontSize: '0.8125rem' }}>Decision Sync</span>
+              <span className="text-muted" style={{ fontSize: '0.8125rem' }}>In sync</span>
               <span className="font-mono" style={{ fontSize: '0.8125rem', fontWeight: 600 }}>{breakdown.sync}%</span>
             </div>
             <div className="breakdown-item">
-              <span className="text-muted" style={{ fontSize: '0.8125rem' }}>Risk Taking</span>
+              <span className="text-muted" style={{ fontSize: '0.8125rem' }}>Boldness</span>
               <span className="font-mono" style={{ fontSize: '0.8125rem', fontWeight: 600 }}>{breakdown.risk}%</span>
             </div>
             <div className="breakdown-item">
-              <span className="text-muted" style={{ fontSize: '0.8125rem' }}>Trust Level</span>
+              <span className="text-muted" style={{ fontSize: '0.8125rem' }}>Trust</span>
               <span className="font-mono" style={{ fontSize: '0.8125rem', fontWeight: 600 }}>{breakdown.trust}%</span>
             </div>
             <div className="breakdown-item" style={{ borderBottom: 'none' }}>
-              <span className="text-muted" style={{ fontSize: '0.8125rem' }}>Plot Alignment</span>
+              <span className="text-muted" style={{ fontSize: '0.8125rem' }}>Story pull</span>
               <span className="font-mono" style={{ fontSize: '0.8125rem', fontWeight: 600 }}>{breakdown.direction}%</span>
             </div>
           </div>

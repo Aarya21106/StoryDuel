@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useGame } from './hooks/useGame';
 import { Landing } from './components/Landing';
+import { Library } from './components/Library';
+import { StoryDetail } from './components/StoryDetail';
 import { InviteCreated } from './components/InviteCreated';
 import { Matching } from './components/Matching';
-import { ObjectiveReveal } from './components/ObjectiveReveal';
+import { Briefing } from './components/Briefing';
 import { GameRound } from './components/GameRound';
 import { RoundReveal } from './components/RoundReveal';
 import { StoryTransition } from './components/StoryTransition';
@@ -12,6 +14,7 @@ import { FriendJoin } from './components/FriendJoin';
 import { AdminLogin } from './components/AdminLogin';
 import { AdminDashboard } from './components/AdminDashboard';
 import { trackClientEvent } from './utils/analytics';
+import type { StoryListItem } from './hooks/useGame';
 
 export const App: React.FC = () => {
   const game = useGame();
@@ -40,6 +43,10 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleChooseStory = (story: StoryListItem) => {
+    game.chooseStory(story);
+  };
+
   return (
     <>
       {/* Toast Notification */}
@@ -52,9 +59,27 @@ export const App: React.FC = () => {
       {/* Screen Router */}
       {game.screen === 'landing' && (
         <Landing
-          onPlayStranger={game.playWithStranger}
-          onInviteFriend={game.createInvite}
+          onContinue={(name) => { game.setDisplayName(name); game.setScreen('library'); }}
           onAdminClick={() => game.setScreen('admin_login')}
+        />
+      )}
+
+      {game.screen === 'library' && (
+        <Library
+          displayName={game.displayName}
+          stories={game.stories}
+          onChoose={handleChooseStory}
+          onAdminClick={() => game.setScreen('admin_login')}
+        />
+      )}
+
+      {game.screen === 'story_detail' && game.selectedStory && (
+        <StoryDetail
+          story={game.selectedStory}
+          onBack={() => game.setScreen('library')}
+          onPlayStranger={() => game.playWithStranger(game.displayName, game.selectedStory!.id)}
+          onPlayNarrator={() => game.playWithNarrator(game.displayName, game.selectedStory!.id)}
+          onInviteFriend={() => game.createInvite(game.displayName, game.selectedStory!.id)}
         />
       )}
 
@@ -65,7 +90,8 @@ export const App: React.FC = () => {
       {game.screen === 'invite_created' && game.inviteCode && (
         <InviteCreated
           inviteCode={game.inviteCode}
-          onBack={() => game.setScreen('landing')}
+          storyTitle={game.scenarioTitle}
+          onBack={() => game.setScreen('library')}
         />
       )}
 
@@ -80,8 +106,8 @@ export const App: React.FC = () => {
         />
       )}
 
-      {game.screen === 'objective_reveal' && (
-        <ObjectiveReveal objective={game.objective} />
+      {game.screen === 'briefing' && game.storyBrief && (
+        <Briefing brief={game.storyBrief} onBegin={game.confirmBriefing} />
       )}
 
       {game.screen === 'game_round' && game.currentRound && (
@@ -89,6 +115,7 @@ export const App: React.FC = () => {
           round={game.currentRound}
           partnerLocked={game.partnerLocked}
           myLockedChoice={game.myLockedChoice}
+          laneMessage={game.laneMessage}
           onSubmitChoice={game.submitChoice}
         />
       )}
@@ -98,7 +125,7 @@ export const App: React.FC = () => {
       )}
 
       {game.screen === 'story_transition' && (
-        <StoryTransition transitionText={game.transitionText} />
+        <StoryTransition transitionText={game.transitionText} variant={game.transitionVariant} />
       )}
 
       {game.screen === 'final_reveal' && game.finalResults && (
@@ -108,7 +135,7 @@ export const App: React.FC = () => {
           onGuessPartner={game.submitGuess}
           guessResult={game.guessResult}
           onPlayAgain={game.replay}
-          onInviteFriend={() => game.createInvite(game.displayName)}
+          onInviteFriend={() => game.setScreen('library')}
           onReport={handleReport}
         />
       )}
@@ -116,7 +143,7 @@ export const App: React.FC = () => {
       {game.screen === 'admin_login' && (
         <AdminLogin
           onLoginSuccess={handleAdminSuccess}
-          onCancel={() => game.setScreen('landing')}
+          onCancel={() => game.setScreen(game.displayName ? 'library' : 'landing')}
         />
       )}
 

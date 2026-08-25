@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 const SUBTEXTS = [
   'Someone is out there.',
   'Finding your co-author...',
-  'Connecting your stories...',
+  'Setting the scene...',
   'Almost ready.',
   'This is going to be interesting.',
 ];
@@ -22,9 +22,8 @@ export const Matching: React.FC = () => {
     <div className="screen app-container" style={{ textAlign: 'center', justifyContent: 'center' }}>
       <div style={{ width: '100%' }}>
         <div className="orbit-container" style={{ marginBottom: '40px' }}>
-          <div className="orbit-dot" />
-          <div className="orbit-dot" />
-          <div className="orbit-dot" />
+          <div className="breathe-ring" />
+          <div className="breathe-core" />
         </div>
 
         <h2 style={{ marginBottom: '16px' }}>Entering the story...</h2>
@@ -35,7 +34,7 @@ export const Matching: React.FC = () => {
           style={{
             fontSize: '1rem',
             minHeight: '24px',
-            animation: 'screenFadeIn 0.5s var(--ease-out)',
+            animation: 'screenFadeIn 500ms var(--ease-film)',
           }}
         >
           {SUBTEXTS[subtextIndex]}

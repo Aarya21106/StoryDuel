@@ -1,20 +1,30 @@
 // ── Matchmaking Queue ──
-// In-memory queue. Players wait for a partner.
-// If no human joins within 6 seconds, an AI player is silently assigned.
+// In-memory queue. Players wait for a partner who chose the SAME story.
+// If nobody joins within 6 seconds, an AI co-lead is silently assigned.
+//
+// The session is created exactly once, by whichever call performs the
+// match (or the AI-fallback timer) — both sides then share one real
+// session id and one real socket room.
+
+import { v4 as uuid } from 'uuid';
+import { gameManager } from './game.js';
+import { trackEvent } from './db.js';
 
 interface QueueEntry {
-  playerId: string;
+  key: string;
   displayName: string;
   socketId: string;
-  joinedAt: number;
+  storyId: string;
   timer: NodeJS.Timeout;
   resolve: (match: MatchResult) => void;
 }
 
 export interface MatchResult {
-  partnerId: string | null;       // null if AI
+  sessionId: string;
+  playerId: string;
   partnerName: string;
   partnerIsAI: boolean;
+  scenarioTitle: string;
 }
 
 const queue: Map<string, QueueEntry> = new Map();
@@ -26,70 +36,96 @@ const AI_NAMES = [
   'Meera', 'Kabir', 'Tara', 'Veer', 'Sana', 'Jay', 'Aisha',
 ];
 
-function randomAIName(excludeName: string): string {
+export function randomAIName(excludeName: string): string {
   const available = AI_NAMES.filter(n => n.toLowerCase() !== excludeName.toLowerCase());
   return available[Math.floor(Math.random() * available.length)] || 'Sam';
 }
 
 /**
- * Add a player to the matchmaking queue.
- * Returns a promise that resolves when a match is found (human or AI).
+ * Add a player to the matchmaking queue for a specific story.
+ * Resolves once a real match is made, or an AI co-lead is assigned.
  */
-export function joinQueue(playerId: string, displayName: string, socketId: string): Promise<MatchResult> {
+export function joinQueue(displayName: string, socketId: string, storyId: string): Promise<MatchResult> {
   return new Promise((resolve) => {
-    // Check if someone is already waiting
-    const waitingEntries = Array.from(queue.entries());
+    const waiting = Array.from(queue.entries()).find(([, e]) => e.storyId === storyId);
 
-    if (waitingEntries.length > 0) {
-      // Match with the first waiting player
-      const [waitingId, waitingEntry] = waitingEntries[0];
+    if (waiting) {
+      const [waitingKey, waitingEntry] = waiting;
       clearTimeout(waitingEntry.timer);
-      queue.delete(waitingId);
+      queue.delete(waitingKey);
 
-      // Resolve both: the waiting player gets this player, and vice versa
+      const sessionData = gameManager.createSession('stranger', storyId);
+      const player1Id = gameManager.addPlayer(sessionData.sessionId, waitingEntry.displayName, false, sessionData.objectives[0], waitingEntry.socketId);
+      const player2Id = gameManager.addPlayer(sessionData.sessionId, displayName, false, sessionData.objectives[1], socketId);
+      trackEvent('match', sessionData.sessionId);
+
       waitingEntry.resolve({
-        partnerId: playerId,
+        sessionId: sessionData.sessionId,
+        playerId: player1Id,
         partnerName: displayName,
         partnerIsAI: false,
+        scenarioTitle: sessionData.scenario.title,
       });
 
       resolve({
-        partnerId: waitingEntry.playerId,
+        sessionId: sessionData.sessionId,
+        playerId: player2Id,
         partnerName: waitingEntry.displayName,
         partnerIsAI: false,
+        scenarioTitle: sessionData.scenario.title,
       });
       return;
     }
 
-    // Nobody waiting — add to queue with AI fallback timer
+    const key = uuid();
     const timer = setTimeout(() => {
-      queue.delete(playerId);
+      queue.delete(key);
+      const sessionData = gameManager.createSession('stranger', storyId);
+      const playerId = gameManager.addPlayer(sessionData.sessionId, displayName, false, sessionData.objectives[0], socketId);
+      const aiName = randomAIName(displayName);
+      gameManager.addPlayer(sessionData.sessionId, aiName, true, sessionData.objectives[1], null);
+      trackEvent('match', sessionData.sessionId);
       resolve({
-        partnerId: null,
-        partnerName: randomAIName(displayName),
+        sessionId: sessionData.sessionId,
+        playerId,
+        partnerName: aiName,
         partnerIsAI: true,
+        scenarioTitle: sessionData.scenario.title,
       });
     }, AI_FALLBACK_DELAY);
 
-    queue.set(playerId, {
-      playerId,
-      displayName,
-      socketId,
-      joinedAt: Date.now(),
-      timer,
-      resolve,
-    });
+    queue.set(key, { key, displayName, socketId, storyId, timer, resolve });
   });
 }
 
 /**
- * Remove a player from the queue (e.g. if they disconnect).
+ * Instantly pair a player with an AI co-lead — no queue, no wait.
  */
-export function leaveQueue(playerId: string) {
-  const entry = queue.get(playerId);
-  if (entry) {
-    clearTimeout(entry.timer);
-    queue.delete(playerId);
+export function matchWithNarrator(displayName: string, socketId: string, storyId: string): MatchResult {
+  const sessionData = gameManager.createSession('stranger', storyId);
+  const playerId = gameManager.addPlayer(sessionData.sessionId, displayName, false, sessionData.objectives[0], socketId);
+  const aiName = randomAIName(displayName);
+  gameManager.addPlayer(sessionData.sessionId, aiName, true, sessionData.objectives[1], null);
+  trackEvent('match', sessionData.sessionId);
+  return {
+    sessionId: sessionData.sessionId,
+    playerId,
+    partnerName: aiName,
+    partnerIsAI: true,
+    scenarioTitle: sessionData.scenario.title,
+  };
+}
+
+/**
+ * Remove a queued (not-yet-matched) player, e.g. on disconnect.
+ */
+export function leaveQueueBySocket(socketId: string) {
+  for (const [key, entry] of queue.entries()) {
+    if (entry.socketId === socketId) {
+      clearTimeout(entry.timer);
+      queue.delete(key);
+      return;
+    }
   }
 }
 

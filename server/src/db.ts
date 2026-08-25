@@ -41,6 +41,9 @@ function initTables() {
       display_name    TEXT NOT NULL,
       is_ai           INTEGER NOT NULL DEFAULT 0,
       secret_objective TEXT NOT NULL,
+      character_role  TEXT NOT NULL DEFAULT '',
+      character_want  TEXT NOT NULL DEFAULT '',
+      current_round   INTEGER NOT NULL DEFAULT 0,
       socket_id       TEXT,
       connected_at    DATETIME DEFAULT CURRENT_TIMESTAMP
     );
@@ -50,6 +53,8 @@ function initTables() {
       session_id      TEXT NOT NULL REFERENCES sessions(id),
       round_number    INTEGER NOT NULL,
       round_type      TEXT NOT NULL CHECK(round_type IN ('choice','write')),
+      pov             TEXT NOT NULL DEFAULT 'shared' CHECK(pov IN ('shared','a','b')),
+      beat_kind       TEXT NOT NULL DEFAULT 'shared' CHECK(beat_kind IN ('shared','solo','convergence')),
       scene_text      TEXT NOT NULL,
       choices_json    TEXT,
       write_prompt    TEXT,
@@ -57,7 +62,7 @@ function initTables() {
       state_after     TEXT,
       is_fallback     INTEGER DEFAULT 0,
       created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(session_id, round_number)
+      UNIQUE(session_id, round_number, pov)
     );
 
     CREATE TABLE IF NOT EXISTS choices_made (
@@ -125,13 +130,20 @@ export function createPlayer(data: {
   display_name: string;
   is_ai: number;
   secret_objective: string;
+  character_role?: string;
+  character_want?: string;
   socket_id: string | null;
 }) {
   const d = getDb();
   d.prepare(`
-    INSERT INTO players (id, session_id, display_name, is_ai, secret_objective, socket_id)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(data.id, data.session_id, data.display_name, data.is_ai, data.secret_objective, data.socket_id);
+    INSERT INTO players (id, session_id, display_name, is_ai, secret_objective, character_role, character_want, socket_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(data.id, data.session_id, data.display_name, data.is_ai, data.secret_objective, data.character_role || '', data.character_want || '', data.socket_id);
+}
+
+export function updatePlayerCurrentRound(playerId: string, roundNumber: number) {
+  const d = getDb();
+  d.prepare('UPDATE players SET current_round = ? WHERE id = ?').run(roundNumber, playerId);
 }
 
 export function createRound(data: {
@@ -139,6 +151,8 @@ export function createRound(data: {
   session_id: string;
   round_number: number;
   round_type: 'choice' | 'write';
+  pov: 'shared' | 'a' | 'b';
+  beat_kind: 'shared' | 'solo' | 'convergence';
   scene_text: string;
   choices_json: string | null;
   write_prompt: string | null;
@@ -147,9 +161,9 @@ export function createRound(data: {
 }) {
   const d = getDb();
   d.prepare(`
-    INSERT INTO rounds (id, session_id, round_number, round_type, scene_text, choices_json, write_prompt, state_before, is_fallback)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(data.id, data.session_id, data.round_number, data.round_type, data.scene_text, data.choices_json, data.write_prompt, data.state_before, data.is_fallback);
+    INSERT INTO rounds (id, session_id, round_number, round_type, pov, beat_kind, scene_text, choices_json, write_prompt, state_before, is_fallback)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(data.id, data.session_id, data.round_number, data.round_type, data.pov, data.beat_kind, data.scene_text, data.choices_json, data.write_prompt, data.state_before, data.is_fallback);
 }
 
 export function saveChoice(data: {
@@ -250,8 +264,8 @@ export function getRound(roundId: string) {
   return getDb().prepare('SELECT * FROM rounds WHERE id = ?').get(roundId) as any;
 }
 
-export function getRoundBySessionAndNumber(sessionId: string, roundNumber: number) {
-  return getDb().prepare('SELECT * FROM rounds WHERE session_id = ? AND round_number = ?').get(sessionId, roundNumber) as any;
+export function getRoundBySessionAndNumber(sessionId: string, roundNumber: number, pov: string = 'shared') {
+  return getDb().prepare('SELECT * FROM rounds WHERE session_id = ? AND round_number = ? AND pov = ?').get(sessionId, roundNumber, pov) as any;
 }
 
 export function getChoicesForRound(roundId: string) {
