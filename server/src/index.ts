@@ -4,6 +4,7 @@ import cors from 'cors';
 import http from 'http';
 import { Server as SocketServer } from 'socket.io';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 import { getDb, trackEvent, getSessionByInvite, getPlayers, getPlayer, getRound, getChoicesForRound, getSession } from './db.js';
@@ -79,12 +80,19 @@ app.get('/api/invite/:code', (req, res) => {
   });
 });
 
-// ── Serve static client in production ──
+// ── Serve static client, only if it was built alongside the server ──
+// (Not the case when the client is deployed separately, e.g. on Vercel.)
 const clientDist = path.join(__dirname, '..', '..', 'client', 'dist');
-app.use(express.static(clientDist));
-app.get('*', (_req, res) => {
-  res.sendFile(path.join(clientDist, 'index.html'));
-});
+if (fs.existsSync(clientDist)) {
+  app.use(express.static(clientDist));
+  app.get('*', (_req, res) => {
+    res.sendFile(path.join(clientDist, 'index.html'));
+  });
+} else {
+  app.get('/', (_req, res) => {
+    res.json({ ok: true, service: 'storyduel-server' });
+  });
+}
 
 // ── HTTP + Socket.io ──
 const server = http.createServer(app);

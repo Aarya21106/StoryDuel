@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { PulseButton } from './ui/PulseButton';
+import { API_BASE_URL } from '../config';
 
 interface AdminLoginProps {
   onLoginSuccess: (token: string) => void;
@@ -18,7 +19,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, onCancel
     setError('');
 
     try {
-      const res = await fetch('/api/admin/login', {
+      const res = await fetch(`${API_BASE_URL}/api/admin/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),

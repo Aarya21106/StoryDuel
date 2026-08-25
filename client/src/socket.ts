@@ -1,8 +1,7 @@
 import { io, Socket } from 'socket.io-client';
+import { API_BASE_URL } from './config';
 
-const URL = import.meta.env.DEV ? 'http://localhost:3001' : window.location.origin;
-
-export const socket: Socket = io(URL, {
+export const socket: Socket = io(API_BASE_URL || undefined, {
   autoConnect: false,
   transports: ['websocket', 'polling'],
   reconnection: true,

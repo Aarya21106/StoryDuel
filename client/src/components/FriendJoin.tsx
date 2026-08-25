@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { PulseButton } from './ui/PulseButton';
+import { API_BASE_URL } from '../config';
 
 interface FriendJoinProps {
   inviteCode: string;
@@ -22,8 +23,7 @@ export const FriendJoin: React.FC<FriendJoinProps> = ({ inviteCode, onJoin, onHo
   const [error, setError] = useState('');
 
   useEffect(() => {
-    const base = import.meta.env.DEV ? 'http://localhost:3001' : '';
-    fetch(`${base}/api/invite/${inviteCode}`)
+    fetch(`${API_BASE_URL}/api/invite/${inviteCode}`)
       .then((res) => {
         if (!res.ok) throw new Error('Invite not found');
         return res.json();

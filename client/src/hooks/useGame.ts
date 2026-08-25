@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { socket } from '../socket';
+import { API_BASE_URL } from '../config';
 
 export interface DimensionBreakdown {
   sync: number;
@@ -151,8 +152,7 @@ export function useGame() {
 
   // Fetch the story library once on mount.
   useEffect(() => {
-    const base = import.meta.env.DEV ? 'http://localhost:3001' : '';
-    fetch(`${base}/api/stories`)
+    fetch(`${API_BASE_URL}/api/stories`)
       .then((res) => res.json())
       .then((data) => setStories(data.stories || []))
       .catch(() => setStories([]));

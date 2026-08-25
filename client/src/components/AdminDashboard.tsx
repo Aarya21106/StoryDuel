@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { PulseButton } from './ui/PulseButton';
+import { API_BASE_URL } from '../config';
 
 interface AdminDashboardProps {
   token: string;
@@ -12,7 +13,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onLogout 
   const [error, setError] = useState('');
 
   useEffect(() => {
-    fetch('/api/admin/stats', {
+    fetch(`${API_BASE_URL}/api/admin/stats`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((res) => {

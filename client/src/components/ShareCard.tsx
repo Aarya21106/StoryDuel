@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { shareResult } from '../utils/share';
+import { API_BASE_URL } from '../config';
 
 interface ShareCardProps {
   sessionId: string;
@@ -17,7 +18,7 @@ export const ShareCard: React.FC<ShareCardProps> = ({
   chemistryScore,
 }) => {
   const [copied, setCopied] = useState(false);
-  const cardSvgUrl = `/api/card/${sessionId}`;
+  const cardSvgUrl = `${API_BASE_URL}/api/card/${sessionId}`;
   const shareText = `${myDisplayName} and I just told "${storyTitle}" on StoryDuel without talking. Our story synergy: ${chemistryScore}%. Can you tell it the same way?`;
   const shareUrl = `${window.location.origin}?ref=${sessionId}`;
 
