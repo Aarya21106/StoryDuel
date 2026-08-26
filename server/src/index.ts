@@ -12,11 +12,33 @@ import { gameManager } from './game.js';
 import { joinQueue, matchWithNarrator, leaveQueueBySocket } from './matchmaking.js';
 import { generateShareCard } from './card.js';
 import adminRouter from './admin.js';
+import authRouter, { verifyUserToken } from './auth.js';
 import { SCENARIOS, getScenario, pickObjectives } from './scenarios.js';
 import type { StoryListItem } from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.PORT || '3001', 10);
+
+// ── Crash safety net ──
+// Node kills the whole process on an unhandled promise rejection by
+// default. The game loop below runs a lot of async work inside
+// setTimeout chains that nothing awaits — a single Gemini/DB error in
+// one player's session must not take down every other live session.
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err);
+});
+
+/** setTimeout for an async callback that logs instead of crashing the process on failure. */
+function safeDelay(fn: () => Promise<void> | void, ms: number, label: string) {
+  setTimeout(() => {
+    Promise.resolve().then(fn).catch((e) => {
+      console.error(`[orchestration] ${label} failed:`, e);
+    });
+  }, ms);
+}
 
 // ── Initialize DB ──
 getDb();
@@ -28,6 +50,9 @@ app.use(express.json());
 
 // ── Admin Routes ──
 app.use('/api/admin', adminRouter);
+
+// ── Auth Routes ──
+app.use('/api/auth', authRouter);
 
 // ── Story Library ──
 app.get('/api/stories', (_req, res) => {
@@ -100,6 +125,18 @@ const io = new SocketServer(server, {
   cors: { origin: '*', methods: ['GET', 'POST'] },
 });
 
+// Optional auth: if the client passed a signed-in user's JWT, resolve it
+// to a userId so their game history gets linked. Guests connect fine
+// without one — never gate the game itself behind sign-in.
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token as string | undefined;
+  if (token) {
+    const userId = verifyUserToken(token);
+    if (userId) socket.data.userId = userId;
+  }
+  next();
+});
+
 // Maps socketId -> { playerId, sessionId }
 const socketSessions = new Map<string, { playerId: string; sessionId: string }>();
 // sessionId -> Set of playerIds who confirmed the briefing
@@ -163,7 +200,7 @@ async function beginSoloRoundForPlayer(sessionId: string, playerId: string, roun
 async function handleSoloSubmitted(sessionId: string, playerId: string, roundNumber: number) {
   if (roundNumber === 2) {
     emitToPlayer(sessionId, playerId, 'lane_advance', { message: 'Your choice sets things in motion...' });
-    setTimeout(() => beginSoloRoundForPlayer(sessionId, playerId, 3), 2200);
+    safeDelay(() => beginSoloRoundForPlayer(sessionId, playerId, 3), 2200, 'begin solo round 3');
     return;
   }
 
@@ -180,13 +217,13 @@ async function handleSoloSubmitted(sessionId: string, playerId: string, roundNum
 
   // Both lanes complete — converge.
   io.to(sessionId).emit('story_converging', { message: 'Your paths are about to cross again...' });
-  setTimeout(async () => {
+  safeDelay(async () => {
     const round4 = await gameManager.generateSharedRound(sessionId, 4);
     io.to(sessionId).emit('round_start', round4);
     scheduleAI(sessionId, round4.roundId, round4.choices, round4.writePrompt, () => {
       resolveAfterAISubmission(sessionId, round4.roundId, 4);
     });
-  }, 2600);
+  }, 2600, 'generate convergence round');
 }
 
 // ── Shared Round Orchestration (rounds 1, 4, 5, 6) ──
@@ -204,19 +241,19 @@ async function handleSharedSubmitted(sessionId: string, roundId: string, roundNu
   }
 
   if (roundNumber === 1) {
-    setTimeout(() => {
+    safeDelay(() => {
       io.to(sessionId).emit('scene_transition', { transitionText: 'Your paths are about to split...' });
-      setTimeout(async () => {
+      safeDelay(async () => {
         for (const p of players) {
           beginSoloRoundForPlayer(sessionId, p.id, 2);
         }
-      }, 1500);
-    }, 3200);
+      }, 1500, 'begin solo lanes');
+    }, 3200, 'round 1 -> split transition');
     return;
   }
 
   if (gameManager.isGameOver(roundNumber)) {
-    setTimeout(async () => {
+    safeDelay(async () => {
       const results = await gameManager.generateResults(sessionId);
       for (const s of await io.in(sessionId).fetchSockets()) {
         const info = socketSessions.get(s.id);
@@ -232,28 +269,33 @@ async function handleSharedSubmitted(sessionId: string, roundId: string, roundNu
           });
         }
       }
-    }, 4500);
+    }, 4500, 'generate final results');
     return;
   }
 
-  setTimeout(async () => {
+  safeDelay(async () => {
     io.to(sessionId).emit('scene_transition', { transitionText: 'The story continues...' });
-    setTimeout(async () => {
+    safeDelay(async () => {
       const nextRound = await gameManager.generateSharedRound(sessionId, roundNumber + 1);
       io.to(sessionId).emit('round_start', nextRound);
       scheduleAI(sessionId, nextRound.roundId, nextRound.choices, nextRound.writePrompt, () => {
         resolveAfterAISubmission(sessionId, nextRound.roundId, roundNumber + 1);
       });
-    }, 1500);
-  }, 3200);
+    }, 1500, 'generate next shared round');
+  }, 3200, 'shared round transition');
 }
 
 async function startTheGame(sessionId: string) {
-  const firstRound = await gameManager.startGame(sessionId);
-  io.to(sessionId).emit('round_start', firstRound);
-  scheduleAI(sessionId, firstRound.roundId, firstRound.choices, firstRound.writePrompt, () => {
-    resolveAfterAISubmission(sessionId, firstRound.roundId, 1);
-  });
+  try {
+    const firstRound = await gameManager.startGame(sessionId);
+    io.to(sessionId).emit('round_start', firstRound);
+    scheduleAI(sessionId, firstRound.roundId, firstRound.choices, firstRound.writePrompt, () => {
+      resolveAfterAISubmission(sessionId, firstRound.roundId, 1);
+    });
+  } catch (e) {
+    console.error('[orchestration] startTheGame failed:', e);
+    io.to(sessionId).emit('error', { message: 'Something went wrong starting the story. Please try again.' });
+  }
 }
 
 io.on('connection', (socket) => {
@@ -265,9 +307,10 @@ io.on('connection', (socket) => {
       const { displayName, storyId, instantAI } = data;
       const chosenStoryId = storyId && getScenario(storyId) ? storyId : SCENARIOS[Math.floor(Math.random() * SCENARIOS.length)].id;
 
+      const userId = (socket.data.userId as string | undefined) || null;
       const match = instantAI
-        ? matchWithNarrator(displayName, socket.id, chosenStoryId)
-        : await joinQueue(displayName, socket.id, chosenStoryId);
+        ? matchWithNarrator(displayName, socket.id, chosenStoryId, userId)
+        : await joinQueue(displayName, socket.id, chosenStoryId, userId);
 
       socketSessions.set(socket.id, { playerId: match.playerId, sessionId: match.sessionId });
       socket.join(match.sessionId);
@@ -296,6 +339,7 @@ io.on('connection', (socket) => {
         false,
         sessionData.objectives[0],
         socket.id,
+        (socket.data.userId as string | undefined) || null,
       );
 
       socketSessions.set(socket.id, { playerId, sessionId: sessionData.sessionId });
@@ -341,6 +385,7 @@ io.on('connection', (socket) => {
         false,
         joinerObjective,
         socket.id,
+        (socket.data.userId as string | undefined) || null,
       );
 
       socketSessions.set(socket.id, { playerId, sessionId: session.id });

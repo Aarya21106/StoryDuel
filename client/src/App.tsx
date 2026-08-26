@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useGame } from './hooks/useGame';
+import { useAuth } from './hooks/useAuth';
 import { Landing } from './components/Landing';
 import { Library } from './components/Library';
 import { StoryDetail } from './components/StoryDetail';
@@ -13,13 +14,20 @@ import { FinalReveal } from './components/FinalReveal';
 import { FriendJoin } from './components/FriendJoin';
 import { AdminLogin } from './components/AdminLogin';
 import { AdminDashboard } from './components/AdminDashboard';
+import { Profile } from './components/Profile';
+import { PrivacyPolicy } from './components/PrivacyPolicy';
+import { AgeGateModal } from './components/AgeGateModal';
 import { trackClientEvent } from './utils/analytics';
 import type { StoryListItem } from './hooks/useGame';
 
+type MetaScreen = 'none' | 'profile' | 'privacy';
+
 export const App: React.FC = () => {
   const game = useGame();
+  const auth = useAuth();
   const [adminToken, setAdminToken] = useState<string | null>(null);
   const [friendInviteParam, setFriendInviteParam] = useState<string | null>(null);
+  const [metaScreen, setMetaScreen] = useState<MetaScreen>('none');
 
   // Check URL query parameters for invite links on initial mount
   useEffect(() => {
@@ -47,6 +55,23 @@ export const App: React.FC = () => {
     game.chooseStory(story);
   };
 
+  // Meta screens (profile / privacy) render on top of the normal game flow.
+  if (metaScreen === 'profile' && auth.user) {
+    return (
+      <Profile
+        user={auth.user}
+        history={auth.history}
+        onBack={() => setMetaScreen('none')}
+        onSignOut={() => { auth.signOut(); setMetaScreen('none'); }}
+        onDeleteAccount={async () => { await auth.deleteAccount(); setMetaScreen('none'); game.setScreen('landing'); }}
+      />
+    );
+  }
+
+  if (metaScreen === 'privacy') {
+    return <PrivacyPolicy onBack={() => setMetaScreen('none')} />;
+  }
+
   return (
     <>
       {/* Toast Notification */}
@@ -54,6 +79,14 @@ export const App: React.FC = () => {
         <div className="toast">
           {game.toastMessage}
         </div>
+      )}
+
+      {/* Age gate: shown when a brand-new Google sign-in needs confirmation */}
+      {auth.pendingCredential && (
+        <AgeGateModal
+          onConfirm={auth.confirmAgeAndRetry}
+          onCancel={auth.cancelAgeConfirm}
+        />
       )}
 
       {/* Screen Router */}
@@ -66,10 +99,14 @@ export const App: React.FC = () => {
 
       {game.screen === 'library' && (
         <Library
-          displayName={game.displayName}
+          displayName={auth.user?.displayName || game.displayName}
           stories={game.stories}
           onChoose={handleChooseStory}
           onAdminClick={() => game.setScreen('admin_login')}
+          onPrivacyClick={() => setMetaScreen('privacy')}
+          authUser={auth.user}
+          onGoogleCredential={(credential) => auth.signInWithCredential(credential)}
+          onProfileClick={() => setMetaScreen('profile')}
         />
       )}
 

@@ -2,14 +2,22 @@ import React from 'react';
 
 interface FooterProps {
   onAdminClick?: () => void;
+  onPrivacyClick?: () => void;
 }
 
-export const Footer: React.FC<FooterProps> = ({ onAdminClick }) => {
+export const Footer: React.FC<FooterProps> = ({ onAdminClick, onPrivacyClick }) => {
   return (
     <footer className="app-footer">
       <span>13+</span>
       <span>·</span>
-      <a href="#privacy" onClick={(e) => { e.preventDefault(); alert('Privacy: StoryDuel collects no personal information beyond session display names. All story text is ephemeral.'); }}>
+      <a
+        href="#privacy"
+        onClick={(e) => {
+          e.preventDefault();
+          if (onPrivacyClick) onPrivacyClick();
+          else alert('Privacy: StoryDuel collects no personal information beyond session display names. All story text is ephemeral.');
+        }}
+      >
         Privacy
       </a>
       <span>·</span>

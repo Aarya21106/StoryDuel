@@ -21,6 +21,17 @@ function initTables() {
   const d = getDb();
 
   d.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id              TEXT PRIMARY KEY,
+      google_sub      TEXT UNIQUE NOT NULL,
+      email           TEXT,
+      display_name    TEXT NOT NULL,
+      age_confirmed   INTEGER NOT NULL DEFAULT 0,
+      tier            TEXT NOT NULL DEFAULT 'free' CHECK(tier IN ('free','paid')),
+      created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+      last_seen_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS sessions (
       id            TEXT PRIMARY KEY,
       invite_code   TEXT UNIQUE,
@@ -38,6 +49,7 @@ function initTables() {
     CREATE TABLE IF NOT EXISTS players (
       id              TEXT PRIMARY KEY,
       session_id      TEXT NOT NULL REFERENCES sessions(id),
+      user_id         TEXT REFERENCES users(id),
       display_name    TEXT NOT NULL,
       is_ai           INTEGER NOT NULL DEFAULT 0,
       secret_objective TEXT NOT NULL,
@@ -97,13 +109,28 @@ function initTables() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_players_session ON players(session_id);
+    CREATE INDEX IF NOT EXISTS idx_players_user ON players(user_id);
     CREATE INDEX IF NOT EXISTS idx_rounds_session ON rounds(session_id);
     CREATE INDEX IF NOT EXISTS idx_choices_round ON choices_made(round_id);
     CREATE INDEX IF NOT EXISTS idx_analytics_event ON analytics_events(event);
     CREATE INDEX IF NOT EXISTS idx_analytics_date ON analytics_events(created_at);
     CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
     CREATE INDEX IF NOT EXISTS idx_sessions_invite ON sessions(invite_code);
+    CREATE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub);
   `);
+
+  migrate(d);
+}
+
+/**
+ * Additive, idempotent migrations for databases created before a given
+ * column/table existed. Safe to run on every boot.
+ */
+function migrate(d: Database.Database) {
+  const playerColumns = d.prepare("PRAGMA table_info(players)").all() as { name: string }[];
+  if (!playerColumns.some(c => c.name === 'user_id')) {
+    d.exec('ALTER TABLE players ADD COLUMN user_id TEXT REFERENCES users(id)');
+  }
 }
 
 // ── Query Helpers ──
@@ -133,12 +160,13 @@ export function createPlayer(data: {
   character_role?: string;
   character_want?: string;
   socket_id: string | null;
+  user_id?: string | null;
 }) {
   const d = getDb();
   d.prepare(`
-    INSERT INTO players (id, session_id, display_name, is_ai, secret_objective, character_role, character_want, socket_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(data.id, data.session_id, data.display_name, data.is_ai, data.secret_objective, data.character_role || '', data.character_want || '', data.socket_id);
+    INSERT INTO players (id, session_id, display_name, is_ai, secret_objective, character_role, character_want, socket_id, user_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(data.id, data.session_id, data.display_name, data.is_ai, data.secret_objective, data.character_role || '', data.character_want || '', data.socket_id, data.user_id || null);
 }
 
 export function updatePlayerCurrentRound(playerId: string, roundNumber: number) {
@@ -352,4 +380,75 @@ export function getAnalytics() {
       moderationFlags: moderationFlags.count,
     },
   };
+}
+
+// ── Users (accounts) ──
+
+export function upsertUserByGoogleSub(data: {
+  id: string;
+  google_sub: string;
+  email: string | null;
+  display_name: string;
+}) {
+  const d = getDb();
+  d.prepare(`
+    INSERT INTO users (id, google_sub, email, display_name)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(google_sub) DO UPDATE SET
+      email = excluded.email,
+      last_seen_at = CURRENT_TIMESTAMP
+  `).run(data.id, data.google_sub, data.email, data.display_name);
+
+  return getUserByGoogleSub(data.google_sub);
+}
+
+export function getUserByGoogleSub(googleSub: string) {
+  return getDb().prepare('SELECT * FROM users WHERE google_sub = ?').get(googleSub) as any;
+}
+
+export function getUserById(userId: string) {
+  return getDb().prepare('SELECT * FROM users WHERE id = ?').get(userId) as any;
+}
+
+export function confirmUserAge(userId: string) {
+  getDb().prepare('UPDATE users SET age_confirmed = 1 WHERE id = ?').run(userId);
+}
+
+export function updateUserDisplayName(userId: string, displayName: string) {
+  getDb().prepare('UPDATE users SET display_name = ? WHERE id = ?').run(displayName, userId);
+}
+
+export function getUserPlayHistory(userId: string) {
+  return getDb().prepare(`
+    SELECT
+      s.id AS session_id,
+      s.scenario_id,
+      s.mode,
+      s.status,
+      s.created_at,
+      s.completed_at,
+      r.chemistry_score,
+      r.insight_text,
+      p.display_name AS my_display_name
+    FROM players p
+    JOIN sessions s ON s.id = p.session_id
+    LEFT JOIN results r ON r.session_id = s.id
+    WHERE p.user_id = ?
+    ORDER BY s.created_at DESC
+    LIMIT 50
+  `).all(userId) as any[];
+}
+
+/**
+ * Delete an account. Player rows tied to shared game sessions are kept
+ * (the other participant's history still needs them) but stripped of
+ * anything identifying: display name replaced, user_id cleared.
+ */
+export function deleteUser(userId: string) {
+  const d = getDb();
+  const tx = d.transaction(() => {
+    d.prepare("UPDATE players SET user_id = NULL, display_name = 'Deleted user', socket_id = NULL WHERE user_id = ?").run(userId);
+    d.prepare('DELETE FROM users WHERE id = ?').run(userId);
+  });
+  tx();
 }

@@ -1,18 +1,27 @@
 import React, { useMemo, useState } from 'react';
 import { Poster } from './ui/Poster';
 import { Footer } from './ui/Footer';
+import { GoogleSignIn } from './ui/GoogleSignIn';
 import type { StoryListItem } from '../hooks/useGame';
+import type { AuthUser } from '../hooks/useAuth';
 
 interface LibraryProps {
   displayName: string;
   stories: StoryListItem[];
   onChoose: (story: StoryListItem) => void;
   onAdminClick: () => void;
+  onPrivacyClick: () => void;
+  authUser: AuthUser | null;
+  onGoogleCredential: (credential: string) => void;
+  onProfileClick: () => void;
 }
 
 const GENRES = ['all', 'mystery', 'horror', 'romance', 'adventure', 'emotional', 'comedy', 'scifi', 'chaos'];
 
-export const Library: React.FC<LibraryProps> = ({ displayName, stories, onChoose, onAdminClick }) => {
+export const Library: React.FC<LibraryProps> = ({
+  displayName, stories, onChoose, onAdminClick, onPrivacyClick,
+  authUser, onGoogleCredential, onProfileClick,
+}) => {
   const [genre, setGenre] = useState('all');
 
   const filtered = useMemo(
@@ -23,7 +32,19 @@ export const Library: React.FC<LibraryProps> = ({ displayName, stories, onChoose
   return (
     <div className="screen app-container" style={{ maxWidth: '720px', justifyContent: 'flex-start' }}>
       <div className="library-header">
-        <div className="eyebrow" style={{ marginBottom: '8px' }}>Welcome, {displayName || 'storyteller'}</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', gap: '12px', flexWrap: 'wrap' }}>
+          <div className="eyebrow">Welcome, {displayName || 'storyteller'}</div>
+          {authUser ? (
+            <button
+              onClick={onProfileClick}
+              style={{ background: 'none', border: '1px solid color-mix(in oklab, var(--paper) 16%, transparent)', borderRadius: 'var(--radius-full)', color: 'var(--text-cream)', fontSize: '0.75rem', padding: '6px 14px', cursor: 'pointer' }}
+            >
+              {authUser.displayName} · Profile
+            </button>
+          ) : (
+            <GoogleSignIn onCredential={onGoogleCredential} />
+          )}
+        </div>
         <h2 style={{ marginBottom: '6px' }}>Pick a story to step into.</h2>
         <p className="text-muted" style={{ fontSize: '0.9375rem', maxWidth: '480px' }}>
           {stories.length || '—'} stories. Every one splits into two paths and brings them back together.
@@ -72,7 +93,7 @@ export const Library: React.FC<LibraryProps> = ({ displayName, stories, onChoose
         )}
       </div>
 
-      <Footer onAdminClick={onAdminClick} />
+      <Footer onAdminClick={onAdminClick} onPrivacyClick={onPrivacyClick} />
     </div>
   );
 };

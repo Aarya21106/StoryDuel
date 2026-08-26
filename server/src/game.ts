@@ -136,7 +136,7 @@ export class GameManager {
   /**
    * Add a player to a session. First player added becomes POV 'a', second 'b'.
    */
-  addPlayer(sessionId: string, displayName: string, isAI: boolean, objective: string, socketId: string | null): string {
+  addPlayer(sessionId: string, displayName: string, isAI: boolean, objective: string, socketId: string | null, userId?: string | null): string {
     const playerId = uuid();
     const session = db.getSession(sessionId);
     const scenario = getScenario(session.scenario_id);
@@ -151,6 +151,7 @@ export class GameManager {
       secret_objective: objective,
       character_role: castSlot?.role || '',
       character_want: castSlot?.want || '',
+      user_id: userId || null,
       socket_id: socketId,
     });
     return playerId;
