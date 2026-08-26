@@ -41,9 +41,34 @@ function initTables() {
       scenario_seed TEXT,
       current_round INTEGER NOT NULL DEFAULT 0,
       write_round   INTEGER NOT NULL DEFAULT 4,
+      total_rounds  INTEGER NOT NULL DEFAULT 6,
+      history_summary TEXT NOT NULL DEFAULT '',
       game_state    TEXT NOT NULL DEFAULT '{"danger":20,"trust":20,"mystery":20,"chaos":20}',
       created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
       completed_at  DATETIME
+    );
+
+    CREATE TABLE IF NOT EXISTS stories (
+      id               TEXT PRIMARY KEY,
+      author_user_id   TEXT NOT NULL REFERENCES users(id),
+      title            TEXT NOT NULL,
+      genre            TEXT NOT NULL,
+      prompt           TEXT NOT NULL,
+      seed_json        TEXT NOT NULL,
+      length_rounds    INTEGER NOT NULL DEFAULT 6,
+      visibility       TEXT NOT NULL DEFAULT 'private' CHECK(visibility IN ('private','published')),
+      mode_support     TEXT NOT NULL DEFAULT '["duel"]',
+      is_fallback_seed INTEGER NOT NULL DEFAULT 0,
+      play_count       INTEGER NOT NULL DEFAULT 0,
+      created_at       DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS story_plays (
+      id          TEXT PRIMARY KEY,
+      story_id    TEXT NOT NULL REFERENCES stories(id),
+      session_id  TEXT NOT NULL REFERENCES sessions(id),
+      rating      INTEGER,
+      created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS players (
@@ -117,6 +142,9 @@ function initTables() {
     CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
     CREATE INDEX IF NOT EXISTS idx_sessions_invite ON sessions(invite_code);
     CREATE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub);
+    CREATE INDEX IF NOT EXISTS idx_stories_author ON stories(author_user_id);
+    CREATE INDEX IF NOT EXISTS idx_stories_visibility ON stories(visibility);
+    CREATE INDEX IF NOT EXISTS idx_story_plays_story ON story_plays(story_id);
   `);
 
   migrate(d);
@@ -131,6 +159,14 @@ function migrate(d: Database.Database) {
   if (!playerColumns.some(c => c.name === 'user_id')) {
     d.exec('ALTER TABLE players ADD COLUMN user_id TEXT REFERENCES users(id)');
   }
+
+  const sessionColumns = d.prepare("PRAGMA table_info(sessions)").all() as { name: string }[];
+  if (!sessionColumns.some(c => c.name === 'total_rounds')) {
+    d.exec('ALTER TABLE sessions ADD COLUMN total_rounds INTEGER NOT NULL DEFAULT 6');
+  }
+  if (!sessionColumns.some(c => c.name === 'history_summary')) {
+    d.exec("ALTER TABLE sessions ADD COLUMN history_summary TEXT NOT NULL DEFAULT ''");
+  }
 }
 
 // ── Query Helpers ──
@@ -142,13 +178,18 @@ export function createSession(data: {
   scenario_id: string;
   scenario_seed: string;
   write_round: number;
+  total_rounds: number;
   game_state: string;
 }) {
   const d = getDb();
   d.prepare(`
-    INSERT INTO sessions (id, invite_code, mode, scenario_id, scenario_seed, write_round, game_state)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(data.id, data.invite_code, data.mode, data.scenario_id, data.scenario_seed, data.write_round, data.game_state);
+    INSERT INTO sessions (id, invite_code, mode, scenario_id, scenario_seed, write_round, total_rounds, game_state)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(data.id, data.invite_code, data.mode, data.scenario_id, data.scenario_seed, data.write_round, data.total_rounds, data.game_state);
+}
+
+export function updateSessionHistorySummary(sessionId: string, summary: string) {
+  getDb().prepare('UPDATE sessions SET history_summary = ? WHERE id = ?').run(summary, sessionId);
 }
 
 export function createPlayer(data: {
@@ -380,6 +421,46 @@ export function getAnalytics() {
       moderationFlags: moderationFlags.count,
     },
   };
+}
+
+// ── Custom Stories ──
+
+export function createStory(data: {
+  id: string;
+  author_user_id: string;
+  title: string;
+  genre: string;
+  prompt: string;
+  seed_json: string;
+  length_rounds: number;
+  is_fallback_seed: boolean;
+}) {
+  const d = getDb();
+  d.prepare(`
+    INSERT INTO stories (id, author_user_id, title, genre, prompt, seed_json, length_rounds, is_fallback_seed)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(data.id, data.author_user_id, data.title, data.genre, data.prompt, data.seed_json, data.length_rounds, data.is_fallback_seed ? 1 : 0);
+}
+
+export function getStoryById(storyId: string) {
+  return getDb().prepare('SELECT * FROM stories WHERE id = ?').get(storyId) as any;
+}
+
+export function getStoriesByAuthor(authorUserId: string) {
+  return getDb().prepare('SELECT * FROM stories WHERE author_user_id = ? ORDER BY created_at DESC').all(authorUserId) as any[];
+}
+
+export function countStoriesCreatedSince(authorUserId: string, sinceIso: string) {
+  const row = getDb().prepare('SELECT COUNT(*) as count FROM stories WHERE author_user_id = ? AND created_at >= ?').get(authorUserId, sinceIso) as any;
+  return row.count as number;
+}
+
+export function incrementStoryPlayCount(storyId: string) {
+  getDb().prepare('UPDATE stories SET play_count = play_count + 1 WHERE id = ?').run(storyId);
+}
+
+export function recordStoryPlay(id: string, storyId: string, sessionId: string) {
+  getDb().prepare('INSERT INTO story_plays (id, story_id, session_id) VALUES (?, ?, ?)').run(id, storyId, sessionId);
 }
 
 // ── Users (accounts) ──

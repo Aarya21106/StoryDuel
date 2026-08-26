@@ -40,6 +40,10 @@ export interface Scenario {
   castA: StoryCharacter;
   castB: StoryCharacter;
   grade: StoryGrade;
+  /** Set only for a DB-backed custom story: its own fixed flavor seed
+   * (reused every play, not regenerated) and its creator-chosen length. */
+  customSeed?: ScenarioSeed;
+  lengthRounds?: number;
 }
 
 export interface StoryListItem {

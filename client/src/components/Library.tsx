@@ -14,13 +14,14 @@ interface LibraryProps {
   authUser: AuthUser | null;
   onGoogleCredential: (credential: string) => void;
   onProfileClick: () => void;
+  onCreateStoryClick: () => void;
 }
 
 const GENRES = ['all', 'mystery', 'horror', 'romance', 'adventure', 'emotional', 'comedy', 'scifi', 'chaos'];
 
 export const Library: React.FC<LibraryProps> = ({
   displayName, stories, onChoose, onAdminClick, onPrivacyClick,
-  authUser, onGoogleCredential, onProfileClick,
+  authUser, onGoogleCredential, onProfileClick, onCreateStoryClick,
 }) => {
   const [genre, setGenre] = useState('all');
 
@@ -46,9 +47,26 @@ export const Library: React.FC<LibraryProps> = ({
           )}
         </div>
         <h2 style={{ marginBottom: '6px' }}>Pick a story to step into.</h2>
-        <p className="text-muted" style={{ fontSize: '0.9375rem', maxWidth: '480px' }}>
+        <p className="text-muted" style={{ fontSize: '0.9375rem', maxWidth: '480px', marginBottom: '16px' }}>
           {stories.length || '—'} stories. Every one splits into two paths and brings them back together.
         </p>
+        <button
+          onClick={onCreateStoryClick}
+          className="glass-card"
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            width: '100%', cursor: 'pointer', border: '1px dashed var(--accent-soft)',
+            marginBottom: '4px', textAlign: 'left',
+          }}
+        >
+          <span>
+            <span style={{ fontFamily: 'var(--font-serif)', fontSize: '1rem', color: 'var(--text-cream)' }}>Have your own idea?</span>
+            <span className="text-muted" style={{ display: 'block', fontSize: '0.8125rem', marginTop: '2px' }}>
+              Describe a premise and we'll turn it into a playable story.
+            </span>
+          </span>
+          <span style={{ color: 'var(--accent)', fontSize: '1.25rem' }}>+</span>
+        </button>
       </div>
 
       <div className="genre-filter-row">

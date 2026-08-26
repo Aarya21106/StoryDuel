@@ -17,10 +17,13 @@ import { AdminDashboard } from './components/AdminDashboard';
 import { Profile } from './components/Profile';
 import { PrivacyPolicy } from './components/PrivacyPolicy';
 import { AgeGateModal } from './components/AgeGateModal';
+import { CreateStory } from './components/CreateStory';
+import { MyStories } from './components/MyStories';
 import { trackClientEvent } from './utils/analytics';
+import { API_BASE_URL } from './config';
 import type { StoryListItem } from './hooks/useGame';
 
-type MetaScreen = 'none' | 'profile' | 'privacy';
+type MetaScreen = 'none' | 'profile' | 'privacy' | 'create_story' | 'my_stories';
 
 export const App: React.FC = () => {
   const game = useGame();
@@ -55,7 +58,25 @@ export const App: React.FC = () => {
     game.chooseStory(story);
   };
 
-  // Meta screens (profile / privacy) render on top of the normal game flow.
+  const handlePlayCustomStory = (story: StoryListItem) => {
+    setMetaScreen('none');
+    game.chooseStory(story);
+  };
+
+  const handleStoryCreated = async (storyId: string) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/stories/${storyId}`, {
+        headers: auth.token ? { Authorization: `Bearer ${auth.token}` } : {},
+      });
+      const data = await res.json();
+      setMetaScreen('none');
+      game.chooseStory(data);
+    } catch {
+      setMetaScreen('my_stories');
+    }
+  };
+
+  // Meta screens (profile / privacy / creator) render on top of the normal game flow.
   if (metaScreen === 'profile' && auth.user) {
     return (
       <Profile
@@ -64,12 +85,36 @@ export const App: React.FC = () => {
         onBack={() => setMetaScreen('none')}
         onSignOut={() => { auth.signOut(); setMetaScreen('none'); }}
         onDeleteAccount={async () => { await auth.deleteAccount(); setMetaScreen('none'); game.setScreen('landing'); }}
+        onMyStories={() => setMetaScreen('my_stories')}
       />
     );
   }
 
   if (metaScreen === 'privacy') {
     return <PrivacyPolicy onBack={() => setMetaScreen('none')} />;
+  }
+
+  if (metaScreen === 'create_story') {
+    return (
+      <CreateStory
+        authUser={auth.user}
+        token={auth.token}
+        onGoogleCredential={(credential) => auth.signInWithCredential(credential)}
+        onBack={() => setMetaScreen('none')}
+        onCreated={handleStoryCreated}
+      />
+    );
+  }
+
+  if (metaScreen === 'my_stories' && auth.token) {
+    return (
+      <MyStories
+        token={auth.token}
+        onBack={() => setMetaScreen('none')}
+        onPlay={handlePlayCustomStory}
+        onCreateNew={() => setMetaScreen('create_story')}
+      />
+    );
   }
 
   return (
@@ -107,6 +152,7 @@ export const App: React.FC = () => {
           authUser={auth.user}
           onGoogleCredential={(credential) => auth.signInWithCredential(credential)}
           onProfileClick={() => setMetaScreen('profile')}
+          onCreateStoryClick={() => setMetaScreen('create_story')}
         />
       )}
 

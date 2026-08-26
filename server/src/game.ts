@@ -1,16 +1,14 @@
 import { v4 as uuid } from 'uuid';
 import * as db from './db.js';
-import { pickScenario, getScenario, generateSeed, pickObjectives, pickWriteRound, SCENARIOS } from './scenarios.js';
+import { pickScenario, getScenario, storyRowToScenario, generateSeed, pickObjectives, pickWriteRound } from './scenarios.js';
 import { getFallbackBeat } from './fallbacks.js';
-import { generateRoundScene, generateFinalAnalysis, fallbackAnalysis } from './ai.js';
+import { generateRoundScene, generateFinalAnalysis, fallbackAnalysis, summarizeRoundsDeterministic } from './ai.js';
 import { pickAIChoice, pickAIWriteResponse, getAIDelay } from './aiPlayer.js';
 import { moderateText } from './moderation.js';
 import type {
   GameState, AIRoundResponse, RoundStartPayload, RoundRevealPayload,
-  SessionCompletePayload, StoryBriefPayload, TranscriptItem,
+  SessionCompletePayload, StoryBriefPayload, TranscriptItem, Scenario,
 } from './types.js';
-
-const TOTAL_ROUNDS = 6;
 
 // A handful of fallback beats were originally authored assuming a
 // different round held the free-text beat, and ship with an empty
@@ -22,16 +20,44 @@ const GENERIC_CHOICES = [
   'Get out before it goes any further.',
 ];
 
-// Round map:
-//   1        shared    — the opening, together
-//   2, 3     solo      — each player walks their own lane, apart
-//   4        convergence — shared scene, paths cross again
-//   5, 6     shared    — together again for the close (one is a write beat)
+// Round map, generalized for any story length (6/12/20 rounds):
+//   1                    shared      — the opening, together
+//   2 .. convergence-1   solo        — each player walks their own lane, apart
+//   convergence          convergence — shared scene, paths cross again
+//   convergence+1 .. N   shared      — together again for the close (one is a write beat)
+//
+// ~40% of the middle rounds are spent apart; this exactly reproduces the
+// original fixed 6-round plan (solo rounds 2-3, convergence round 4) and
+// scales the same shape up for longer custom stories.
 
-function beatKindForRound(roundNumber: number): 'shared' | 'solo' | 'convergence' {
-  if (roundNumber === 2 || roundNumber === 3) return 'solo';
-  if (roundNumber === 4) return 'convergence';
+export interface RoundPlan {
+  soloRounds: number[];
+  convergenceRound: number;
+  totalRounds: number;
+}
+
+export function computeRoundPlan(totalRounds: number): RoundPlan {
+  if (totalRounds <= 3) {
+    return { soloRounds: [], convergenceRound: totalRounds, totalRounds };
+  }
+  const soloCount = Math.max(1, Math.round((totalRounds - 2) * 0.4));
+  const soloRounds = Array.from({ length: soloCount }, (_, i) => 2 + i);
+  const convergenceRound = 2 + soloCount;
+  return { soloRounds, convergenceRound, totalRounds };
+}
+
+function beatKindForRound(roundNumber: number, plan: RoundPlan): 'shared' | 'solo' | 'convergence' {
+  if (plan.soloRounds.includes(roundNumber)) return 'solo';
+  if (roundNumber === plan.convergenceRound) return 'convergence';
   return 'shared';
+}
+
+/** Resolve a story id to its Scenario shape — a built-in story first, then a custom (DB-backed) one. */
+export function resolveScenario(scenarioId: string): Scenario | undefined {
+  const builtIn = getScenario(scenarioId);
+  if (builtIn) return builtIn;
+  const row = db.getStoryById(scenarioId);
+  return row ? storyRowToScenario(row) : undefined;
 }
 
 // ── Reaction Phrases ──
@@ -102,13 +128,19 @@ export class GameManager {
     scenario: { id: string; title: string; genre: string; opening: string };
     seed: ReturnType<typeof generateSeed>;
     writeRound: number;
+    totalRounds: number;
     objectives: [string, string];
     initialState: GameState;
   } {
     const sessionId = uuid();
-    const scenario = (storyId && getScenario(storyId)) || pickScenario();
-    const seed = generateSeed();
-    const writeRound = pickWriteRound();
+    const scenario = (storyId && resolveScenario(storyId)) || pickScenario();
+    // Custom stories carry their own fixed flavor seed (part of the
+    // authored premise) and their creator-chosen length; built-in
+    // stories get a fresh combinatorial seed each play and are fixed
+    // at 6 rounds.
+    const seed = scenario.customSeed || generateSeed();
+    const totalRounds = scenario.lengthRounds || 6;
+    const writeRound = pickWriteRound(totalRounds);
     const objectives = pickObjectives(scenario.genre);
     const inviteCode = mode === 'friend' ? generateInviteCode() : null;
 
@@ -119,8 +151,15 @@ export class GameManager {
       scenario_id: scenario.id,
       scenario_seed: JSON.stringify(seed),
       write_round: writeRound,
+      total_rounds: totalRounds,
       game_state: JSON.stringify(scenario.initialState),
     });
+
+    if (!getScenario(scenario.id)) {
+      // Custom (DB-backed) story — track that it got played.
+      db.incrementStoryPlayCount(scenario.id);
+      db.recordStoryPlay(uuid(), scenario.id, sessionId);
+    }
 
     return {
       sessionId,
@@ -128,6 +167,7 @@ export class GameManager {
       scenario: { id: scenario.id, title: scenario.title, genre: scenario.genre, opening: scenario.opening },
       seed,
       writeRound,
+      totalRounds,
       objectives,
       initialState: scenario.initialState,
     };
@@ -139,7 +179,7 @@ export class GameManager {
   addPlayer(sessionId: string, displayName: string, isAI: boolean, objective: string, socketId: string | null, userId?: string | null): string {
     const playerId = uuid();
     const session = db.getSession(sessionId);
-    const scenario = getScenario(session.scenario_id);
+    const scenario = resolveScenario(session.scenario_id);
     const existing = db.getPlayers(sessionId);
     const castSlot = existing.length === 0 ? scenario?.castA : scenario?.castB;
 
@@ -163,7 +203,7 @@ export class GameManager {
    */
   buildStoryBrief(sessionId: string, playerId: string): StoryBriefPayload {
     const session = db.getSession(sessionId);
-    const scenario = getScenario(session.scenario_id)!;
+    const scenario = resolveScenario(session.scenario_id)!;
     const players = db.getPlayers(sessionId);
     const me = players.find((p: any) => p.id === playerId);
     const partner = players.find((p: any) => p.id !== playerId);
@@ -206,14 +246,15 @@ export class GameManager {
    */
   async generateSharedRound(sessionId: string, roundNumber: number): Promise<RoundStartPayload> {
     const session = db.getSession(sessionId);
-    const scenario = getScenario(session.scenario_id)!;
+    const scenario = resolveScenario(session.scenario_id)!;
     const currentState: GameState = JSON.parse(session.game_state);
     const seed = JSON.parse(session.scenario_seed);
     const isWriteRound = roundNumber === session.write_round;
     const roundType = isWriteRound ? 'write' : 'choice';
-    const beatKind = beatKindForRound(roundNumber);
+    const plan = computeRoundPlan(session.total_rounds);
+    const beatKind = beatKindForRound(roundNumber, plan);
 
-    const history = this.buildSharedHistory(sessionId, roundNumber);
+    const history = this.buildSharedHistory(sessionId, roundNumber, session.total_rounds, session.history_summary);
 
     let sceneData: AIRoundResponse | null = null;
 
@@ -284,11 +325,12 @@ export class GameManager {
     db.updateSessionGameState(sessionId, JSON.stringify(newState));
     db.updateRoundStateAfter(roundId, JSON.stringify(newState));
     db.updateSessionRound(sessionId, roundNumber);
+    this.refreshHistorySummaryIfNeeded(sessionId, session.total_rounds);
 
     return {
       roundId,
       roundNumber,
-      totalRounds: TOTAL_ROUNDS,
+      totalRounds: session.total_rounds,
       roundType,
       beatKind,
       sceneText: sceneData.scene,
@@ -298,13 +340,13 @@ export class GameManager {
   }
 
   /**
-   * Generate a SOLO beat (rounds 2, 3) for exactly one player, built only
-   * from that player's own lane. The other player never sees this content
-   * until the final reveal.
+   * Generate a SOLO beat for exactly one player, built only from that
+   * player's own lane. The other player never sees this content until
+   * the final reveal.
    */
   async generateSoloRound(sessionId: string, playerId: string, roundNumber: number): Promise<RoundStartPayload> {
     const session = db.getSession(sessionId);
-    const scenario = getScenario(session.scenario_id)!;
+    const scenario = resolveScenario(session.scenario_id)!;
     const currentState: GameState = JSON.parse(session.game_state);
     const seed = JSON.parse(session.scenario_seed);
     const players = db.getPlayers(sessionId);
@@ -312,7 +354,7 @@ export class GameManager {
     const myCast = pov === 'a' ? scenario.castA : scenario.castB;
     const theirCast = pov === 'a' ? scenario.castB : scenario.castA;
 
-    const history = this.buildSoloHistory(sessionId, pov, roundNumber);
+    const history = this.buildSoloHistory(sessionId, pov, roundNumber, session.total_rounds, session.history_summary);
 
     let sceneData = await generateRoundScene({
       scenarioTitle: scenario.title,
@@ -375,11 +417,12 @@ export class GameManager {
     db.updateSessionGameState(sessionId, JSON.stringify(newState));
     db.updateRoundStateAfter(roundId, JSON.stringify(newState));
     db.updatePlayerCurrentRound(playerId, roundNumber);
+    this.refreshHistorySummaryIfNeeded(sessionId, session.total_rounds);
 
     return {
       roundId,
       roundNumber,
-      totalRounds: TOTAL_ROUNDS,
+      totalRounds: session.total_rounds,
       roundType: 'choice',
       beatKind: 'solo',
       sceneText: sceneData.scene,
@@ -387,9 +430,34 @@ export class GameManager {
     };
   }
 
-  private buildSharedHistory(sessionId: string, upToRoundNumber: number) {
+  /**
+   * Long stories (12/20 rounds) can't feed every past round into every
+   * prompt. Past a certain length, collapse everything except the most
+   * recent 3 rounds into one compressed summary line, cached on the
+   * session row and rebuilt after every round. Short (6-round) stories
+   * are untouched — full verbatim history, exactly as before.
+   */
+  private refreshHistorySummaryIfNeeded(sessionId: string, totalRounds: number) {
+    if (totalRounds <= 6) return;
+    const rounds = db.getRounds(sessionId);
+    if (rounds.length <= 3) return;
+
+    const older = rounds.slice(0, -3);
+    const summary = summarizeRoundsDeterministic(older.map((r: any) => {
+      const choices = db.getChoicesForRound(r.id);
+      return {
+        round: r.round_number,
+        scene: r.scene_text,
+        playerAChoice: choices[0]?.choice_text || '',
+        playerBChoice: choices[1]?.choice_text || '',
+      };
+    }));
+    db.updateSessionHistorySummary(sessionId, summary);
+  }
+
+  private buildSharedHistory(sessionId: string, upToRoundNumber: number, totalRounds: number = 6, storedSummary: string = '') {
     const rounds = db.getRounds(sessionId).filter((r: any) => r.round_number < upToRoundNumber);
-    return rounds.map((r: any) => {
+    const verbatim = (rs: any[]) => rs.map((r: any) => {
       const choices = db.getChoicesForRound(r.id);
       return {
         round: r.round_number,
@@ -398,14 +466,24 @@ export class GameManager {
         playerBChoice: choices[1]?.choice_text || '',
       };
     });
+
+    if (totalRounds <= 6 || rounds.length <= 3) {
+      return verbatim(rounds);
+    }
+
+    const recent = verbatim(rounds.slice(-3));
+    if (storedSummary) {
+      recent.unshift({ round: 0, scene: `[Earlier in the story]: ${storedSummary}`, playerAChoice: '', playerBChoice: '' });
+    }
+    return recent;
   }
 
-  private buildSoloHistory(sessionId: string, pov: 'a' | 'b', upToRoundNumber: number) {
+  private buildSoloHistory(sessionId: string, pov: 'a' | 'b', upToRoundNumber: number, totalRounds: number = 6, storedSummary: string = '') {
     const all = db.getRounds(sessionId);
     const relevant = all.filter((r: any) =>
       r.round_number < upToRoundNumber && (r.pov === 'shared' || r.pov === pov),
     );
-    return relevant.map((r: any) => {
+    const verbatim = (rs: any[]) => rs.map((r: any) => {
       const choices = db.getChoicesForRound(r.id);
       const mine = choices[0]?.choice_text || '';
       return {
@@ -415,6 +493,16 @@ export class GameManager {
         playerBChoice: '',
       };
     });
+
+    if (totalRounds <= 6 || relevant.length <= 3) {
+      return verbatim(relevant);
+    }
+
+    const recent = verbatim(relevant.slice(-3));
+    if (storedSummary) {
+      recent.unshift({ round: 0, scene: `[Earlier in your path]: ${storedSummary}`, playerAChoice: '', playerBChoice: '' });
+    }
+    return recent;
   }
 
   /**
@@ -480,23 +568,31 @@ export class GameManager {
   }
 
   /**
-   * Whether a lane (a/b) has actually submitted its round-3 solo choice.
+   * The solo/convergence round map for this session's actual length.
+   */
+  getRoundPlan(sessionId: string): RoundPlan {
+    const session = db.getSession(sessionId);
+    return computeRoundPlan(session.total_rounds);
+  }
+
+  /**
+   * Whether a lane (a/b) has actually submitted its last solo-round choice.
    */
   laneComplete(sessionId: string, pov: 'a' | 'b'): boolean {
-    const round3 = db.getRoundBySessionAndNumber(sessionId, 3, pov);
-    if (!round3) return false;
-    return db.getChoicesForRound(round3.id).length >= 1;
+    const plan = this.getRoundPlan(sessionId);
+    const lastSolo = plan.soloRounds[plan.soloRounds.length - 1];
+    if (lastSolo === undefined) return true;
+    const round = db.getRoundBySessionAndNumber(sessionId, lastSolo, pov);
+    if (!round) return false;
+    return db.getChoicesForRound(round.id).length >= 1;
   }
 
   /**
    * Check if the game is over after this round.
    */
-  isGameOver(roundNumber: number): boolean {
-    return roundNumber >= TOTAL_ROUNDS;
-  }
-
-  beatKindForRound(roundNumber: number) {
-    return beatKindForRound(roundNumber);
+  isGameOver(sessionId: string, roundNumber: number): boolean {
+    const session = db.getSession(sessionId);
+    return roundNumber >= session.total_rounds;
   }
 
   /**
@@ -507,7 +603,7 @@ export class GameManager {
    */
   async generateResults(sessionId: string): Promise<SessionCompletePayload & { transcriptFor: (playerId: string) => TranscriptItem[] }> {
     const session = db.getSession(sessionId);
-    const scenario = getScenario(session.scenario_id)!;
+    const scenario = resolveScenario(session.scenario_id)!;
     const players = db.getPlayers(sessionId);
     const rounds = db.getRounds(sessionId);
 
@@ -586,7 +682,7 @@ export class GameManager {
     });
 
     if (!analysis) {
-      analysis = fallbackAnalysis(matchCount, clashCount, TOTAL_ROUNDS);
+      analysis = fallbackAnalysis(matchCount, clashCount, session.total_rounds);
     }
 
     db.saveResult({

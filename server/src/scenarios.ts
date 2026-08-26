@@ -1,4 +1,4 @@
-import type { Scenario, SecretObjective } from './types.js';
+import type { Scenario, SecretObjective, ScenarioSeed } from './types.js';
 
 // ── 15 Story Bibles ──
 // Each story is authored with a real premise, two named characters, a
@@ -433,6 +433,38 @@ export function getScenario(id: string): Scenario | undefined {
   return SCENARIOS.find(s => s.id === id);
 }
 
+/**
+ * Convert a `stories` DB row (custom, user-created) into the same
+ * Scenario shape the engine already consumes — this is the whole trick
+ * that lets custom stories run on the existing engine with no parallel
+ * code path.
+ */
+export function storyRowToScenario(row: { id: string; title: string; genre: Scenario['genre']; seed_json: string; length_rounds: number }): Scenario {
+  const seed = JSON.parse(row.seed_json) as {
+    logline: string; synopsis: string; opening: string; initialState: import('./types.js').GameState;
+    toneTags: string[]; castA: import('./types.js').StoryCharacter; castB: import('./types.js').StoryCharacter;
+    seedFlavor: ScenarioSeed;
+  };
+  const lengthOption = LENGTH_OPTIONS.find(o => o.rounds === row.length_rounds);
+
+  return {
+    id: row.id,
+    title: row.title,
+    genre: row.genre,
+    opening: seed.opening,
+    initialState: seed.initialState,
+    logline: seed.logline,
+    synopsis: seed.synopsis,
+    runtime: lengthOption?.label || `${row.length_rounds} rounds`,
+    toneTags: seed.toneTags,
+    castA: seed.castA,
+    castB: seed.castB,
+    grade: GENRE_GRADES[row.genre],
+    customSeed: seed.seedFlavor,
+    lengthRounds: row.length_rounds,
+  };
+}
+
 export function generateSeed() {
   return {
     location: randomPick(LOCATIONS),
@@ -454,8 +486,35 @@ export function pickObjectives(genre: Scenario['genre']): [string, string] {
   return [first.text, second.text];
 }
 
-export function pickWriteRound(): number {
-  // The single free-text round lands in Act III (round 5 or 6 of 6),
-  // after the two players have reconverged.
-  return Math.random() < 0.5 ? 5 : 6;
+export function pickWriteRound(totalRounds: number = 6): number {
+  // The single free-text round lands in the last two rounds, after the
+  // two players have reconverged, regardless of overall story length.
+  return Math.random() < 0.5 ? totalRounds - 1 : totalRounds;
 }
+
+// ── Length options for the Custom Story creator ──
+
+export const LENGTH_OPTIONS = [
+  { label: '10 min', rounds: 6 },
+  { label: '20 min', rounds: 12 },
+  { label: '30 min', rounds: 20 },
+] as const;
+
+export function isValidLengthRounds(rounds: number): boolean {
+  return LENGTH_OPTIONS.some(o => o.rounds === rounds);
+}
+
+// ── Per-genre color grade for custom stories (built-in stories carry
+// their own hand-picked grade; custom stories reuse one per genre so
+// they still look intentional without needing bespoke art direction). ──
+
+export const GENRE_GRADES: Record<Scenario['genre'], { accent: string; accentSoft: string; ink: string; paper: string }> = {
+  mystery: { accent: '#C9A24B', accentSoft: 'rgba(201,162,75,0.16)', ink: '#0B0D10', paper: '#EDE6D6' },
+  horror: { accent: '#9C3B3B', accentSoft: 'rgba(156,59,59,0.18)', ink: '#09090B', paper: '#E4DCD0' },
+  romance: { accent: '#C97B93', accentSoft: 'rgba(201,123,147,0.16)', ink: '#100A0D', paper: '#F1E4E4' },
+  adventure: { accent: '#3F8F72', accentSoft: 'rgba(63,143,114,0.16)', ink: '#08100D', paper: '#E3EDE3' },
+  emotional: { accent: '#7C8FA6', accentSoft: 'rgba(124,143,166,0.16)', ink: '#0A0B0F', paper: '#E6E7EC' },
+  comedy: { accent: '#D99A2B', accentSoft: 'rgba(217,154,43,0.18)', ink: '#0D0A05', paper: '#F3E9CF' },
+  scifi: { accent: '#4FA0C9', accentSoft: 'rgba(79,160,201,0.18)', ink: '#06080C', paper: '#DCE7EE' },
+  chaos: { accent: '#9450A8', accentSoft: 'rgba(148,80,168,0.18)', ink: '#0A0810', paper: '#E7E0EC' },
+};

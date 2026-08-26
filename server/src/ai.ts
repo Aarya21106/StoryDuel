@@ -1,5 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
-import type { AIRoundResponse, AIAnalysisResponse, GameState } from './types.js';
+import type { AIRoundResponse, AIAnalysisResponse, GameState, StoryCharacter } from './types.js';
 
 const apiKey = process.env.GEMINI_API_KEY;
 let genai: GoogleGenAI | null = null;
@@ -60,14 +60,14 @@ state_delta values must be integers between -15 and +15.`;
   try {
     const response = await Promise.race([
       genai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: 'gemini-3.6-flash',
         contents: prompt,
         config: {
           temperature: 0.85,
-          maxOutputTokens: 400,
+          maxOutputTokens: 900,
         },
       }),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 8000)),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 12000)),
     ]);
 
     const text = response.text?.trim();
@@ -130,11 +130,11 @@ OUTPUT (strict JSON only, no markdown, no code fences):
   try {
     const response = await Promise.race([
       genai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: 'gemini-3.6-flash',
         contents: prompt,
         config: {
           temperature: 0.7,
-          maxOutputTokens: 260,
+          maxOutputTokens: 600,
         },
       }),
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 10000)),
@@ -185,4 +185,93 @@ export function fallbackAnalysis(matchCount: number, clashCount: number, totalRo
       direction: Math.round(35 + Math.random() * 50),
     },
   };
+}
+
+// ── Custom Story Seed Generation ──
+// Converts a user's free-text prompt into the structured shape the v1
+// engine already consumes. This generates a SEED, not a story — the
+// round-by-round content is still produced live by generateRoundScene()
+// exactly as it is for the 15 built-in stories.
+
+export interface GeneratedStorySeed {
+  title: string;
+  logline: string;
+  synopsis: string;
+  opening: string;
+  toneTags: string[];
+  castA: StoryCharacter;
+  castB: StoryCharacter;
+  seedFlavor: { location: string; incident: string; tone: string; object: string };
+  initialState: GameState;
+}
+
+export async function generateCustomStorySeed(prompt: string, genre: string): Promise<GeneratedStorySeed | null> {
+  if (!genai) return null;
+
+  const aiPrompt = `You are designing a two-player interactive story for StoryDuel. A user described what they want; turn it into a structured story seed for the engine — you are NOT writing the story itself, only its premise, opening, and two characters.
+
+USER'S PROMPT: "${prompt}"
+GENRE: ${genre}
+
+Design:
+1. title: short, evocative, 2-5 words.
+2. logline: one sentence hook for a story-picker card.
+3. synopsis: 2-3 sentences setting up the situation, present tense.
+4. opening: 1-2 sentences of scene text, present tense second person ("You..."), the very first thing both players read.
+5. toneTags: 3 short lowercase mood words.
+6. castA and castB: two DIFFERENT lead characters who will each be played by one of the two real players. Each needs { name, role (a short phrase, e.g. "the one who found the letter"), want (what they want, one clause) }. Make them meaningfully different from each other.
+7. seedFlavor: { location, incident, tone, object } — a location, a triggering incident, a one-word tone, and a small object, all consistent with the premise. These are flavor details the round-generator will reference later.
+8. initialState: { danger, trust, mystery, chaos } each 0-100, reflecting the genre and premise's starting mood.
+
+OUTPUT (strict JSON only, no markdown, no code fences):
+{ "title": "...", "logline": "...", "synopsis": "...", "opening": "...", "toneTags": ["...","...","..."], "castA": {"name":"...","role":"...","want":"..."}, "castB": {"name":"...","role":"...","want":"..."}, "seedFlavor": {"location":"...","incident":"...","tone":"...","object":"..."}, "initialState": {"danger":N,"trust":N,"mystery":N,"chaos":N} }`;
+
+  try {
+    const response = await Promise.race([
+      genai.models.generateContent({
+        model: 'gemini-3.6-flash',
+        contents: aiPrompt,
+        config: { temperature: 0.9, maxOutputTokens: 1200 },
+      }),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 12000)),
+    ]);
+
+    const text = response.text?.trim();
+    if (!text) return null;
+
+    const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+    const parsed = JSON.parse(cleaned) as GeneratedStorySeed;
+
+    if (!parsed.title || !parsed.opening || !parsed.castA?.name || !parsed.castB?.name || !parsed.seedFlavor) return null;
+
+    for (const key of ['danger', 'trust', 'mystery', 'chaos'] as const) {
+      const v = parsed.initialState?.[key];
+      parsed.initialState = parsed.initialState || ({} as GameState);
+      parsed.initialState[key] = Math.max(0, Math.min(100, Math.round(typeof v === 'number' ? v : 20)));
+    }
+
+    return parsed;
+  } catch (e) {
+    console.error('[AI] Custom story seed generation failed:', (e as Error).message);
+    return null;
+  }
+}
+
+/**
+ * Cheap, deterministic summary of a run of rounds — used to compress
+ * older history for long (12/20-round) stories instead of feeding every
+ * past round verbatim into every prompt. No AI call: fast, free, and
+ * good enough as a memory aid rather than prose.
+ */
+export function summarizeRoundsDeterministic(rounds: { round: number; scene: string; playerAChoice: string; playerBChoice: string }[]): string {
+  return rounds
+    .map(r => {
+      const sceneExcerpt = r.scene.length > 80 ? r.scene.slice(0, 80) + '…' : r.scene;
+      const choices = [r.playerAChoice, r.playerBChoice].filter(Boolean);
+      const choiceNote = choices.length === 2
+        ? `A chose "${choices[0]}", B chose "${choices[1]}"`
+        : choices.length === 1 ? `chose "${choices[0]}"` : '';
+      return `R${r.round}: ${sceneExcerpt}${choiceNote ? ' — ' + choiceNote : ''}`;
+    })
+    .join(' | ');
 }

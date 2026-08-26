@@ -7,14 +7,16 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 
-import { getDb, trackEvent, getSessionByInvite, getPlayers, getPlayer, getRound, getChoicesForRound, getSession } from './db.js';
-import { gameManager } from './game.js';
+import { getDb, trackEvent, getSessionByInvite, getPlayers, getPlayer, getRound, getChoicesForRound, getSession, getStoriesByAuthor, countStoriesCreatedSince, getStoryById } from './db.js';
+import { gameManager, resolveScenario } from './game.js';
 import { joinQueue, matchWithNarrator, leaveQueueBySocket } from './matchmaking.js';
 import { generateShareCard } from './card.js';
 import adminRouter from './admin.js';
-import authRouter, { verifyUserToken } from './auth.js';
-import { SCENARIOS, getScenario, pickObjectives } from './scenarios.js';
-import type { StoryListItem } from './types.js';
+import authRouter, { verifyUserToken, requireUser, type AuthedRequest } from './auth.js';
+import { createCustomStory } from './storyCreator.js';
+import { rateLimit } from './rateLimit.js';
+import { SCENARIOS, getScenario, pickObjectives, LENGTH_OPTIONS } from './scenarios.js';
+import type { StoryListItem, Scenario } from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.PORT || '3001', 10);
@@ -69,6 +71,105 @@ app.get('/api/stories', (_req, res) => {
   res.json({ stories: list });
 });
 
+// ── Custom Stories (Phase 2) ──
+
+const STORY_CREATION_LIMIT_PER_HOUR = 5;
+
+app.post('/api/stories/custom', requireUser, async (req: AuthedRequest, res) => {
+  try {
+    const { prompt, genre, lengthRounds } = req.body as { prompt?: string; genre?: string; lengthRounds?: number };
+    const validGenres: Scenario['genre'][] = ['mystery', 'horror', 'romance', 'adventure', 'emotional', 'comedy', 'scifi', 'chaos'];
+
+    if (!prompt || typeof prompt !== 'string') {
+      res.status(400).json({ error: 'A story prompt is required' });
+      return;
+    }
+    if (!genre || !validGenres.includes(genre as Scenario['genre'])) {
+      res.status(400).json({ error: 'Invalid genre' });
+      return;
+    }
+    if (!lengthRounds || !LENGTH_OPTIONS.some(o => o.rounds === lengthRounds)) {
+      res.status(400).json({ error: 'Invalid story length' });
+      return;
+    }
+
+    if (!rateLimit(`story-create:${req.userId}`, STORY_CREATION_LIMIT_PER_HOUR, 60 * 60 * 1000)) {
+      res.status(429).json({ error: `You can create up to ${STORY_CREATION_LIMIT_PER_HOUR} stories per hour. Try again soon.` });
+      return;
+    }
+
+    const result = await createCustomStory({
+      authorUserId: req.userId!,
+      prompt,
+      genre: genre as Scenario['genre'],
+      lengthRounds,
+    });
+
+    if (!result.ok) {
+      res.status(422).json({ error: result.error });
+      return;
+    }
+
+    res.json({ story: result.story });
+  } catch (e) {
+    console.error('[API] create custom story error:', e);
+    res.status(500).json({ error: 'Failed to create story' });
+  }
+});
+
+app.get('/api/stories/mine', requireUser, (req: AuthedRequest, res) => {
+  const stories = getStoriesByAuthor(req.userId!);
+  res.json({
+    stories: stories.map((s: any) => {
+      const scenario = resolveScenario(s.id)!;
+      return {
+        id: s.id,
+        title: s.title,
+        genre: s.genre,
+        logline: scenario.logline,
+        synopsis: scenario.synopsis,
+        toneTags: scenario.toneTags,
+        runtime: scenario.runtime,
+        grade: scenario.grade,
+        visibility: s.visibility,
+        playCount: s.play_count,
+        createdAt: s.created_at,
+      };
+    }),
+  });
+});
+
+app.get('/api/stories/:id', (req, res) => {
+  const row = getStoryById(req.params.id);
+  if (!row) {
+    // Not a custom story — let the client fall back to the built-in list.
+    res.status(404).json({ error: 'Story not found' });
+    return;
+  }
+
+  if (row.visibility === 'private') {
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
+    const userId = token ? verifyUserToken(token) : null;
+    if (!userId || userId !== row.author_user_id) {
+      res.status(404).json({ error: 'Story not found' });
+      return;
+    }
+  }
+
+  const scenario = resolveScenario(row.id)!;
+  res.json({
+    id: scenario.id,
+    title: scenario.title,
+    genre: scenario.genre,
+    logline: scenario.logline,
+    synopsis: scenario.synopsis,
+    toneTags: scenario.toneTags,
+    runtime: scenario.runtime,
+    grade: scenario.grade,
+  });
+});
+
 // ── Share Card Route ──
 app.get('/api/card/:sessionId', (req, res) => {
   const svg = generateShareCard(req.params.sessionId);
@@ -90,7 +191,7 @@ app.get('/api/invite/:code', (req, res) => {
   }
   const players = getPlayers(session.id);
   const creator = players[0];
-  const scenario = getScenario(session.scenario_id);
+  const scenario = resolveScenario(session.scenario_id);
   res.json({
     sessionId: session.id,
     inviteCode: session.invite_code,
@@ -157,7 +258,7 @@ function scheduleAI(sessionId: string, roundId: string, choices: string[] | unde
 
   const sessionDb = getSession(sessionId);
   const gameState = JSON.parse(sessionDb.game_state);
-  const scenario = getScenario(sessionDb.scenario_id);
+  const scenario = resolveScenario(sessionDb.scenario_id);
 
   gameManager.scheduleAIChoice(
     roundId, aiPlayer.id, choices, writePrompt, scenario?.genre || 'mystery', gameState,
@@ -182,7 +283,7 @@ function resolveAfterAISubmission(sessionId: string, roundId: string, roundNumbe
   handleSharedSubmitted(sessionId, roundId, roundNumber);
 }
 
-// ── Solo Lane Orchestration (rounds 2 & 3) ──
+// ── Solo Lane Orchestration (variable-length, driven by the round plan) ──
 
 async function beginSoloRoundForPlayer(sessionId: string, playerId: string, roundNumber: number) {
   const player = getPlayer(playerId);
@@ -198,13 +299,18 @@ async function beginSoloRoundForPlayer(sessionId: string, playerId: string, roun
 }
 
 async function handleSoloSubmitted(sessionId: string, playerId: string, roundNumber: number) {
-  if (roundNumber === 2) {
+  const plan = gameManager.getRoundPlan(sessionId);
+  const idx = plan.soloRounds.indexOf(roundNumber);
+  const isLastSolo = idx === -1 || idx === plan.soloRounds.length - 1;
+
+  if (!isLastSolo) {
     emitToPlayer(sessionId, playerId, 'lane_advance', { message: 'Your choice sets things in motion...' });
-    safeDelay(() => beginSoloRoundForPlayer(sessionId, playerId, 3), 2200, 'begin solo round 3');
+    const nextRound = plan.soloRounds[idx + 1];
+    safeDelay(() => beginSoloRoundForPlayer(sessionId, playerId, nextRound), 2200, 'begin next solo round');
     return;
   }
 
-  // roundNumber === 3 — this player's solo lane is complete.
+  // Last solo round for this player — their lane is complete.
   const players = getPlayers(sessionId);
   const partner = players.find((p: any) => p.id !== playerId);
   const partnerPov = partner ? gameManager.povOfPlayer(sessionId, partner.id) : null;
@@ -218,10 +324,10 @@ async function handleSoloSubmitted(sessionId: string, playerId: string, roundNum
   // Both lanes complete — converge.
   io.to(sessionId).emit('story_converging', { message: 'Your paths are about to cross again...' });
   safeDelay(async () => {
-    const round4 = await gameManager.generateSharedRound(sessionId, 4);
-    io.to(sessionId).emit('round_start', round4);
-    scheduleAI(sessionId, round4.roundId, round4.choices, round4.writePrompt, () => {
-      resolveAfterAISubmission(sessionId, round4.roundId, 4);
+    const convergenceRound = await gameManager.generateSharedRound(sessionId, plan.convergenceRound);
+    io.to(sessionId).emit('round_start', convergenceRound);
+    scheduleAI(sessionId, convergenceRound.roundId, convergenceRound.choices, convergenceRound.writePrompt, () => {
+      resolveAfterAISubmission(sessionId, convergenceRound.roundId, plan.convergenceRound);
     });
   }, 2600, 'generate convergence round');
 }
@@ -241,18 +347,20 @@ async function handleSharedSubmitted(sessionId: string, roundId: string, roundNu
   }
 
   if (roundNumber === 1) {
+    const plan = gameManager.getRoundPlan(sessionId);
+    const firstSoloRound = plan.soloRounds[0];
     safeDelay(() => {
       io.to(sessionId).emit('scene_transition', { transitionText: 'Your paths are about to split...' });
       safeDelay(async () => {
         for (const p of players) {
-          beginSoloRoundForPlayer(sessionId, p.id, 2);
+          beginSoloRoundForPlayer(sessionId, p.id, firstSoloRound);
         }
       }, 1500, 'begin solo lanes');
     }, 3200, 'round 1 -> split transition');
     return;
   }
 
-  if (gameManager.isGameOver(roundNumber)) {
+  if (gameManager.isGameOver(sessionId, roundNumber)) {
     safeDelay(async () => {
       const results = await gameManager.generateResults(sessionId);
       for (const s of await io.in(sessionId).fetchSockets()) {
@@ -305,7 +413,7 @@ io.on('connection', (socket) => {
   socket.on('join_matchmaking', async (data: { displayName: string; storyId?: string; instantAI?: boolean }) => {
     try {
       const { displayName, storyId, instantAI } = data;
-      const chosenStoryId = storyId && getScenario(storyId) ? storyId : SCENARIOS[Math.floor(Math.random() * SCENARIOS.length)].id;
+      const chosenStoryId = storyId && resolveScenario(storyId) ? storyId : SCENARIOS[Math.floor(Math.random() * SCENARIOS.length)].id;
 
       const userId = (socket.data.userId as string | undefined) || null;
       const match = instantAI
@@ -374,7 +482,7 @@ io.on('connection', (socket) => {
         return;
       }
 
-      const scenario = getScenario(session.scenario_id);
+      const scenario = resolveScenario(session.scenario_id);
       const firstObjective = existingPlayers[0]?.secret_objective;
       const newObjectives = pickObjectives(scenario?.genre || 'mystery');
       const joinerObjective = newObjectives[1] !== firstObjective ? newObjectives[1] : newObjectives[0];

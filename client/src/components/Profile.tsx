@@ -8,9 +8,10 @@ interface ProfileProps {
   onBack: () => void;
   onSignOut: () => void;
   onDeleteAccount: () => Promise<void>;
+  onMyStories: () => void;
 }
 
-export const Profile: React.FC<ProfileProps> = ({ user, history, onBack, onSignOut, onDeleteAccount }) => {
+export const Profile: React.FC<ProfileProps> = ({ user, history, onBack, onSignOut, onDeleteAccount, onMyStories }) => {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -65,6 +66,9 @@ export const Profile: React.FC<ProfileProps> = ({ user, history, onBack, onSignO
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <PulseButton variant="primary" onClick={onMyStories}>
+            Your created stories
+          </PulseButton>
           <PulseButton variant="secondary" onClick={onSignOut}>
             Sign out
           </PulseButton>
